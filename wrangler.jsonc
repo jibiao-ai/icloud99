@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yuanqing-ai-viz",
+  "compatibility_date": "2026-09-16",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yuanqing-db",
+      "database_id": "local-dev-placeholder"
+    }
+  ]
+}
