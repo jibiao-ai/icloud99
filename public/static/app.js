@@ -93,6 +93,37 @@ const tierLabel = (t) => ({ lite: 'Lite', standard: 'Standard', ultra: 'Ultra' }
 const tierColor = (t) => ({ lite: 'from-blue-400 to-cyan-500', standard: 'from-violet-500 to-purple-600', ultra: 'from-amber-500 to-orange-600' }[t] || 'from-gray-400 to-gray-500');
 const tierBadge = (t) => `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold text-white bg-gradient-to-r ${tierColor(t)} shadow-sm">${tierLabel(t)}</span>`;
 
+// Generate a 12+ char hex account ID from test id + timestamp
+function genAccountId(id, testedAt) {
+  let hash = 0x9e3779b9;
+  const str = String(id) + (testedAt || '') + String(id * 2654435761);
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+    hash = (hash ^ (hash >>> 16)) | 0;
+  }
+  const a = (Math.abs(hash) >>> 0).toString(16).padStart(8, '0');
+  let hash2 = 0x517cc1b7;
+  for (let i = str.length - 1; i >= 0; i--) {
+    hash2 = ((hash2 << 7) + hash2 + str.charCodeAt(i)) | 0;
+    hash2 = (hash2 ^ (hash2 >>> 13)) | 0;
+  }
+  const b = (Math.abs(hash2) >>> 0).toString(16).padStart(4, '0');
+  return a + b;
+}
+
+// Format date for modal: MM/DD HH:mm:ss
+function fmtDateFull(dateStr) {
+  try {
+    const d = new Date(dateStr);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${mm}/${dd} ${hh}:${mi}:${ss}`;
+  } catch { return dateStr || ''; }
+}
+
 // ===== CHANNEL STATUS PAGE =====
 async function renderChannelStatus() {
   const ct = document.getElementById('page-content');
@@ -225,23 +256,34 @@ async function renderIQTest() {
       const hasImg = t.image_url && t.image_url.length > 10;
       const resultColor = t.result === 'pass' ? 'from-emerald-500 to-emerald-600' : t.result === 'works' ? 'from-amber-500 to-amber-600' : 'from-red-500 to-red-600';
       const resultText = t.result === 'pass' ? '智力通过' : t.result === 'works' ? '可疑作品' : '降智记录';
+      const resultDotColor = t.result === 'pass' ? 'bg-emerald-400' : t.result === 'works' ? 'bg-amber-400' : 'bg-red-400';
       const resultIcon = t.result === 'pass' ? 'fa-check-circle' : t.result === 'works' ? 'fa-exclamation-circle' : 'fa-times-circle';
       const timeStr = fmtTime(t.tested_at);
       const elapsed = (t.response_time_ms / 1000).toFixed(1);
-      const idShort = String(t.id).padStart(4, '0');
+      // Generate 12+ character hex account ID from test data
+      const accountId = genAccountId(t.id, t.tested_at);
+      // Format date for modal: MM/DD HH:mm:ss
+      const modalDate = fmtDateFull(t.tested_at);
+      // Escape data for onclick attribute
+      const escapedModel = (t.model || '').replace(/'/g, "\\'");
+      const escapedTier = (t.tier || '').replace(/'/g, "\\'");
+      const escapedImgUrl = hasImg ? (t.image_url || '').replace(/'/g, "\\'") : '';
+      const escapedAccountId = accountId.replace(/'/g, "\\'");
+      const escapedModalDate = modalDate.replace(/'/g, "\\'");
 
-      html += `<div class="${cls.card()} overflow-hidden fade-in group">
-        <div class="flex items-center justify-between px-2.5 py-1.5 text-[10px] ${isDark()?'bg-slate-700/50 text-slate-400':'bg-gray-50 text-gray-500'}">
-          <span class="font-mono">账号 ID: ${idShort}</span>
-          <span>${timeStr}</span>
+      html += `<div class="${cls.card()} overflow-hidden fade-in group cursor-pointer" onclick="showPelicanModal('${escapedImgUrl}','${escapedModel}','${escapedTier}','${t.result}','${escapedAccountId}','${escapedModalDate}',${t.response_time_ms || 0},${t.score || 0})">
+        <div class="flex items-center justify-between px-2.5 py-1.5 text-[10px] ${isDark()?'bg-slate-700/50 text-slate-400':'bg-gray-50/80 text-gray-500'} border-b ${isDark()?'border-slate-700/50':'border-gray-100'}">
+          <span class="font-mono truncate">账号 ID: ${accountId}</span>
+          <span class="ml-1 flex-shrink-0">${timeStr}</span>
         </div>
-        <div class="relative aspect-square ${isDark()?'bg-slate-900':'bg-gray-100'}">
-          ${hasImg ? `<img src="${t.image_url}" alt="鹈鹕骑行" class="w-full h-full object-cover cursor-pointer transition-transform group-hover:scale-105" onclick="showImageModal(this.src,'${t.model} [${tierLabel(t.tier)}]','${resultText}','${t.result}')">` : `<div class="w-full h-full flex flex-col items-center justify-center gap-2"><i class="fas fa-bicycle text-3xl ${cls.textMuted()}"></i><span class="text-xs ${cls.textMuted()}">无结果图</span></div>`}
-          <div class="absolute top-1.5 right-1.5"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white bg-gradient-to-r ${resultColor} shadow-md"><i class="fas ${resultIcon} text-[9px]"></i>${resultText}</span></div>
+        <div class="relative aspect-square ${isDark()?'bg-slate-900':'bg-gray-100'} overflow-hidden">
+          ${hasImg ? `<img src="${t.image_url}" alt="鹈鹕骑行" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy">` : `<div class="w-full h-full flex flex-col items-center justify-center gap-2"><i class="fas fa-bicycle text-3xl ${cls.textMuted()}"></i><span class="text-xs ${cls.textMuted()}">无结果图</span></div>`}
+          <div class="absolute top-1.5 right-1.5"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white bg-gradient-to-r ${resultColor} shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block"></span>${resultText}</span></div>
+          ${hasImg ? `<div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100"><span class="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-gray-800/80 backdrop-blur-sm flex items-center gap-1.5 shadow-lg"><span>放大动画</span><i class="fas fa-arrow-up-right-from-square text-[10px]"></i></span></div>` : ''}
         </div>
         <div class="px-2.5 py-2 flex items-center justify-between">
-          <div class="flex items-center gap-1.5"><span class="font-mono text-[11px] ${cls.text()}">${t.model}</span>${tierBadge(t.tier)}</div>
-          <span class="font-mono text-[11px] ${cls.textSub()}">${elapsed} 秒</span>
+          <div class="flex items-center gap-1.5 min-w-0"><span class="font-mono text-[11px] ${cls.text()} truncate">${t.model}</span>${tierBadge(t.tier)}</div>
+          <span class="font-mono text-[11px] ${cls.textSub()} flex-shrink-0 ml-1">${elapsed} 秒</span>
         </div>
       </div>`;
     });
@@ -440,31 +482,49 @@ window.doChangePassword = async function() {
   } else { toast(resp.message || '修改失败', 'error'); }
 };
 
-// ===== Image Modal =====
-window.showImageModal = function(imageUrl, modelInfo, statusText, result) {
+// ===== Pelican Animation Preview Modal (matches reference design) =====
+window.showPelicanModal = function(imageUrl, model, tier, result, accountId, dateStr, responseTimeMs, score) {
   const d = isDark();
-  const statusColor = result === 'pass' ? 'from-emerald-500 to-emerald-600' : result === 'works' ? 'from-amber-500 to-amber-600' : 'from-red-500 to-red-600';
-  const statusIcon = result === 'pass' ? 'fa-check-circle' : result === 'works' ? 'fa-exclamation-circle' : 'fa-times-circle';
+  const statusText = result === 'pass' ? '智力通过' : result === 'works' ? '可疑作品' : '降智记录';
+  const tierText = tierLabel(tier);
   const root = document.getElementById('modal-root');
+  const hasImage = imageUrl && imageUrl.length > 10;
+  const elapsed = responseTimeMs ? (responseTimeMs / 1000).toFixed(1) : '-';
+
   root.innerHTML = `
-    <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
-      <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800 border border-slate-700' : 'bg-white border-gray-200'}" onclick="event.stopPropagation()">
-        <div class="h-1.5 bg-gradient-to-r ${statusColor}"></div>
-        <div class="p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
-              <i class="fas ${statusIcon} text-lg ${result === 'pass' ? 'text-emerald-500' : result === 'works' ? 'text-amber-500' : 'text-red-500'}"></i>
-              <div>
-                <span class="text-sm font-semibold ${cls.text()}">${modelInfo}</span>
-                <span class="ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold text-white bg-gradient-to-r ${statusColor}">${statusText}</span>
-              </div>
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-md z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
+      <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()" style="max-height:90vh;display:flex;flex-direction:column">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-5 py-3.5 border-b ${d ? 'border-slate-700' : 'border-gray-200'} flex-shrink-0">
+          <h3 class="text-base font-semibold ${cls.text()}">鹈鹕骑行 · 动画预览</h3>
+          <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times text-sm"></i></button>
+        </div>
+        <!-- Image -->
+        <div class="flex-1 overflow-auto">
+          <div class="p-4 pb-2">
+            ${hasImage
+              ? `<div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700' : 'border-gray-200'} ${d ? 'bg-slate-900' : 'bg-gray-50'}">
+                  <img src="${imageUrl}" alt="鹈鹕骑行动画" class="w-full h-auto" style="max-height:60vh;object-fit:contain;display:block;margin:0 auto">
+                </div>`
+              : `<div class="rounded-xl border ${d ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'} flex flex-col items-center justify-center py-20 gap-3">
+                  <i class="fas fa-bicycle text-5xl ${cls.textMuted()}"></i>
+                  <span class="${cls.textSub()} text-sm">暂无骑行动画</span>
+                </div>`}
+          </div>
+          <!-- Metadata footer -->
+          <div class="px-4 pb-4">
+            <div class="flex items-center justify-center gap-1.5 text-xs ${d ? 'text-slate-500' : 'text-gray-400'} font-mono">
+              <span>账号 ID: ${accountId}</span>
+              <span class="opacity-50">·</span>
+              <span>${dateStr}</span>
+              <span class="opacity-50">·</span>
+              <span>${model}</span>
+              <span class="opacity-50">·</span>
+              <span>${tierText.toLowerCase()}</span>
+              <span class="opacity-50">·</span>
+              <span>${statusText}</span>
             </div>
-            <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'}"><i class="fas fa-times"></i></button>
           </div>
-          <div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700' : 'border-gray-200'}">
-            <img src="${imageUrl}" alt="鹈鹕骑行结果" class="w-full h-auto max-h-[60vh] object-contain ${d ? 'bg-slate-900' : 'bg-gray-50'}">
-          </div>
-          <p class="${cls.textMuted()} text-xs mt-2 text-center">智力检测 · 鹈鹕骑行 · AI生成结果图</p>
         </div>
       </div>
     </div>`;
