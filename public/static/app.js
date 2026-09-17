@@ -124,6 +124,42 @@ function fmtDateFull(dateStr) {
   } catch { return dateStr || ''; }
 }
 
+// Scope SVG CSS to avoid conflicts when multiple SVGs are on the same page
+function scopeSvgForCard(svgCode, id) {
+  const uid = 'sv' + id;
+  let s = svgCode;
+  // Remove fixed width/height, keep viewBox
+  s = s.replace(/(<svg[^>]*?)\s+width\s*=\s*["'][^"']*["']/gi, '$1');
+  s = s.replace(/(<svg[^>]*?)\s+height\s*=\s*["'][^"']*["']/gi, '$1');
+  // Set responsive sizing
+  s = s.replace(/<svg/i, `<svg width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="display:block"`);
+  // Scope id/href/url references
+  s = s.replace(/id="([^"]*)"/gi, `id="${uid}_$1"`);
+  s = s.replace(/href="#([^"]*)"/gi, `href="#${uid}_$1"`);
+  s = s.replace(/url\(#([^)]*)\)/gi, `url(#${uid}_$1)`);
+  s = s.replace(/aria-labelledby="([^"]*)"/gi, (m, ids) => {
+    return `aria-labelledby="${ids.split(/\s+/).map(i => uid + '_' + i).join(' ')}"`;
+  });
+  // Scope class names in elements
+  s = s.replace(/class="([^"]*)"/gi, (match, classes) => {
+    const scoped = classes.split(/\s+/).map(c => c ? uid + '_' + c : '').join(' ');
+    return `class="${scoped}"`;
+  });
+  // Scope CSS inside <style>: class selectors + @keyframes names + animation references
+  s = s.replace(/<style>([\s\S]*?)<\/style>/gi, (match, css) => {
+    let sc = css;
+    // Scope .classname selectors
+    sc = sc.replace(/\.([a-zA-Z][\w-]*)/g, '.' + uid + '_$1');
+    // Scope @keyframes names
+    sc = sc.replace(/@keyframes\s+([\w-]+)/g, '@keyframes ' + uid + '_$1');
+    // Scope animation: name references
+    sc = sc.replace(/animation:\s*([\w-]+)/g, (m, name) => 'animation: ' + uid + '_' + name);
+    // Scope animation-delay stays unchanged (it's a time value)
+    return `<style>${sc}</style>`;
+  });
+  return s;
+}
+
 // ===== CHANNEL STATUS PAGE =====
 async function renderChannelStatus() {
   const ct = document.getElementById('page-content');
@@ -269,13 +305,10 @@ async function renderIQTest() {
       // Store SVG code for modal access (avoid inline onclick with huge SVG data)
       if (hasSvg) window.__iqTestSVGs[t.id] = t.svg_code;
 
-      // Sanitize SVG for inline card display: remove width/height, ensure viewBox, set 100%
+      // Prepare SVG for inline card: scope CSS classes to avoid conflicts between cards
       let cardSvg = '';
       if (hasSvg) {
-        cardSvg = t.svg_code
-          .replace(/width\s*=\s*["'][^"']*["']/gi, '')
-          .replace(/height\s*=\s*["'][^"']*["']/gi, '')
-          .replace(/<svg/i, '<svg width="100%" height="100%" style="display:block"');
+        cardSvg = scopeSvgForCard(t.svg_code, t.id);
       }
 
       html += `<div class="${cls.card()} overflow-hidden fade-in group cursor-pointer" onclick="showPelicanModal(${t.id})">
@@ -283,9 +316,9 @@ async function renderIQTest() {
           <span class="font-mono truncate">账号 ID: ${accountId}</span>
           <span class="ml-1 flex-shrink-0">${timeStr}</span>
         </div>
-        <div class="relative aspect-square ${isDark()?'bg-slate-900':'bg-gray-100'} overflow-hidden">
+        <div class="relative ${isDark()?'bg-slate-900':'bg-gray-100'} overflow-hidden" style="aspect-ratio:${hasSvg ? '8/5' : '1/1'}">
           ${hasSvg
-            ? `<div class="w-full h-full svg-card-container">${cardSvg}</div>`
+            ? `<div class="w-full h-full">${cardSvg}</div>`
             : hasImg
               ? `<img src="${t.image_url}" alt="鹈鹕骑行" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy">`
               : `<div class="w-full h-full flex flex-col items-center justify-center gap-2"><i class="fas fa-bicycle text-3xl ${cls.textMuted()}"></i><span class="text-xs ${cls.textMuted()}">无结果图</span></div>`}
@@ -509,13 +542,10 @@ window.showPelicanModal = function(testId) {
   const dateStr = fmtDateFull(t.tested_at);
   const tierText = tierLabel(t.tier);
 
-  // Prepare SVG for modal display - make it responsive
+  // Prepare SVG for modal display - scope it to avoid conflicts with cards
   let modalSvg = '';
   if (hasSvg) {
-    modalSvg = window.__iqTestSVGs[testId]
-      .replace(/width\s*=\s*["'][^"']*["']/gi, '')
-      .replace(/height\s*=\s*["'][^"']*["']/gi, '')
-      .replace(/<svg/i, '<svg width="100%" height="100%" style="display:block"');
+    modalSvg = scopeSvgForCard(window.__iqTestSVGs[testId], 'modal' + testId);
   }
 
   const root = document.getElementById('modal-root');
@@ -531,7 +561,7 @@ window.showPelicanModal = function(testId) {
         <div class="flex-1 overflow-auto">
           <div class="p-4 pb-2">
             ${hasSvg
-              ? `<div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'} svg-modal-container" style="min-height:300px">
+              ? `<div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}">
                   ${modalSvg}
                 </div>`
               : hasImg
