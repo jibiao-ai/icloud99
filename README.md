@@ -95,7 +95,11 @@ yuanqing-ai-viz/
 ├── wrangler.jsonc           # Cloudflare Workers 配置
 ├── ecosystem.config.cjs     # PM2 进程管理配置
 ├── Dockerfile               # Docker 容器构建
-└── docker-compose.yml       # Docker Compose 编排
+├── docker-compose.yml       # Docker Compose 编排（Nginx + App）
+├── nginx.conf               # Nginx 反向代理配置
+└── certs/                   # SSL 证书目录（HTTPS 用）
+    ├── fullchain.pem
+    └── privkey.pem
 ```
 
 ---
@@ -104,10 +108,28 @@ yuanqing-ai-viz/
 
 ### 方式一：Docker 部署（推荐）
 
+采用 **Nginx + App** 双容器架构，Nginx 对外暴露 **80（HTTP）** 和 **443（HTTPS）** 端口，反向代理到内部应用。
+
+```
+┌─────────────────────────────────────────────┐
+│  Docker Compose                              │
+│                                              │
+│  ┌──────────┐    proxy     ┌──────────────┐ │
+│  │  Nginx   │ ──────────→  │  App (Hono)  │ │
+│  │ :80/:443 │   port 3000  │  + Wrangler  │ │
+│  └──────────┘              │  + D1 SQLite │ │
+│       ↑                    └──────────────┘ │
+│   外部访问                       ↓           │
+│                          yuanqing-d1-data   │
+│                          (Docker Volume)     │
+└─────────────────────────────────────────────┘
+```
+
 #### 前置要求
 
 - Docker >= 20.10
 - Docker Compose >= 2.0
+- 服务器开放 **80** 和 **443** 端口
 
 #### 1. 克隆仓库
 
@@ -116,55 +138,113 @@ git clone https://github.com/jibiao-ai/icloud99.git
 cd icloud99
 ```
 
-#### 2. 使用 Docker Compose 一键启动
+#### 2. 一键启动（HTTP）
 
 ```bash
 docker compose up -d
 ```
 
-服务将在 `http://localhost:3000` 启动。
+服务启动后访问：`http://<你的服务器IP>`（端口 80）
 
-#### 3. 初始化数据库
+#### 3. 启用 HTTPS（可选）
 
-容器首次启动时会自动执行数据库迁移。如需手动初始化种子数据：
+如果你有域名和 SSL 证书（可通过 Let's Encrypt 免费获取）：
 
-1. 打开浏览器访问 `http://localhost:3000`
+```bash
+# 创建证书目录并放入证书文件
+mkdir -p certs
+cp /path/to/fullchain.pem certs/
+cp /path/to/privkey.pem certs/
+```
+
+编辑 `nginx.conf`，取消 HTTPS 部分的注释，并修改 `server_name`：
+
+```nginx
+# 取消注释 HTTP → HTTPS 重定向
+return 301 https://$host$request_uri;
+
+# 取消注释整个 HTTPS server 块，修改域名
+server {
+    listen 443 ssl;
+    server_name your-domain.com;   # ← 改为你的域名
+    ...
+}
+```
+
+重启服务：
+
+```bash
+docker compose restart nginx
+```
+
+访问：`https://your-domain.com`
+
+**使用 Let's Encrypt 自动获取免费证书**：
+
+```bash
+# 安装 certbot（以 Ubuntu 为例）
+sudo apt install certbot
+
+# 先停止 nginx 释放 80 端口
+docker compose stop nginx
+
+# 获取证书
+sudo certbot certonly --standalone -d your-domain.com
+
+# 复制证书到项目目录
+sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem certs/
+sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem certs/
+sudo chmod 644 certs/*.pem
+
+# 编辑 nginx.conf 启用 HTTPS（参考上面的步骤）
+# 重新启动
+docker compose up -d
+```
+
+#### 4. 初始化数据
+
+容器首次启动时自动执行数据库迁移。初始化种子数据：
+
+1. 浏览器访问 `http://<服务器IP>` 或 `https://your-domain.com`
 2. 点击左侧菜单「管理设置」
-3. 使用默认账号登录：`admin` / `admin123`
+3. 使用默认账号登录：`admin` / `admin123`（**请登录后立即修改密码**）
 4. 点击「初始化数据」按钮
 
-#### 4. 配置 API 密钥
+#### 5. 配置 API 密钥
 
 在管理设置中为各分组配置 New API 密钥：
 
 - **API URL**: `https://api.icloud99.cn`
 - **API Key**: 你的 `sk-xxxxxxxx` 令牌
 
-#### 5. 常用命令
+#### 6. 常用命令
 
 ```bash
-# 启动服务（后台运行）
+# 启动（后台运行）
 docker compose up -d
 
 # 查看日志
 docker compose logs -f
+docker compose logs -f app     # 仅看应用日志
+docker compose logs -f nginx   # 仅看 Nginx 日志
 
-# 停止服务
+# 停止
 docker compose down
 
-# 重新构建并启动（代码更新后）
+# 代码更新后重新构建
+git pull
 docker compose up -d --build
 
 # 进入容器调试
 docker compose exec app sh
 
-# 查看数据库
-docker compose exec app cat /app/.wrangler/state/v3/d1/*.sqlite
+# 重启 Nginx（修改 nginx.conf 后）
+docker compose restart nginx
 ```
 
-#### 6. 数据持久化
+#### 7. 数据持久化
 
-Docker Compose 配置中已挂载数据卷 `yuanqing-d1-data`，数据库文件持久存储在 Docker volume 中，容器重启不会丢失数据。
+D1 数据库文件持久存储在 Docker Volume `yuanqing-d1-data` 中，容器重建不丢失。
 
 ```bash
 # 查看数据卷
@@ -173,20 +253,10 @@ docker volume ls | grep yuanqing
 # 备份数据库
 docker compose exec app sh -c "cp -r /app/.wrangler/state/v3/d1 /tmp/d1-backup"
 docker cp $(docker compose ps -q app):/tmp/d1-backup ./d1-backup
-```
 
-#### 7. 自定义配置
-
-| 环境变量 | 默认值 | 说明 |
-|---------|--------|------|
-| `PORT` | `3000` | 服务端口 |
-| `NODE_ENV` | `production` | 运行环境 |
-
-修改端口映射，编辑 `docker-compose.yml`：
-
-```yaml
-ports:
-  - "8080:3000"   # 将外部 8080 映射到容器内 3000
+# 恢复数据库
+docker cp ./d1-backup $(docker compose ps -q app):/app/.wrangler/state/v3/d1
+docker compose restart app
 ```
 
 #### 8. 不使用 Docker Compose（纯 Docker）
@@ -195,16 +265,27 @@ ports:
 # 构建镜像
 docker build -t yuanqing-ai-viz .
 
-# 运行容器
+# 运行应用容器
 docker run -d \
   --name yuanqing-ai \
-  -p 3000:3000 \
   -v yuanqing-d1-data:/app/.wrangler/state/v3/d1 \
   --restart unless-stopped \
   yuanqing-ai-viz
 
+# 运行 Nginx 容器（对外 80/443）
+docker run -d \
+  --name yuanqing-nginx \
+  -p 80:80 \
+  -p 443:443 \
+  -v $(pwd)/nginx.conf:/etc/nginx/conf.d/default.conf:ro \
+  -v $(pwd)/certs:/etc/nginx/certs:ro \
+  --link yuanqing-ai:app \
+  --restart unless-stopped \
+  nginx:alpine
+
 # 查看日志
 docker logs -f yuanqing-ai
+docker logs -f yuanqing-nginx
 ```
 
 ---
@@ -227,17 +308,13 @@ npm install
 #### 2. 初始化数据库
 
 ```bash
-# 执行迁移（本地 SQLite）
 npm run db:migrate:local
 ```
 
 #### 3. 构建并启动
 
 ```bash
-# 构建前端
 npm run build
-
-# 启动本地开发服务器
 npm run dev:sandbox
 ```
 
@@ -298,10 +375,10 @@ npx wrangler pages deploy dist --project-name yuanqing-ai-viz
 
 ```bash
 # 每小时检测渠道状态
-0 * * * * curl -s -X POST http://localhost:3000/api/test-channels
+0 * * * * curl -s -X POST http://localhost/api/test-channels
 
 # 每3小时运行智力检测（Lite → Standard → Ultra 轮转）
-0 0,3,6,9,12,15,18,21 * * * curl -s -X POST http://localhost:3000/api/run-iq-test \
+0 0,3,6,9,12,15,18,21 * * * curl -s -X POST http://localhost/api/run-iq-test \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-5.6-sol","tier":"lite","provider":"openai"}'
 ```
@@ -309,6 +386,7 @@ npx wrangler pages deploy dist --project-name yuanqing-ai-viz
 ## 部署状态
 
 - **平台**: Cloudflare Pages / Docker
+- **对外端口**: 80 (HTTP) / 443 (HTTPS)
 - **状态**: ✅ Active
 - **技术栈**: Hono + TypeScript + Tailwind CSS + D1 (SQLite)
 - **GitHub**: https://github.com/jibiao-ai/icloud99
