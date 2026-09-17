@@ -983,7 +983,7 @@ window.doTokenQuery = async function() {
   tokenUsageStore.data = null;
   tokenUsageStore.logPage = 1;
   tokenUsageStore.logFilter = '';
-  tokenUsageStore.activeTab = 'overview';
+  tokenUsageStore.activeTab = 'stats';
 
   const ct = document.getElementById('page-content');
   ct.innerHTML = `<div class="flex flex-col items-center justify-center h-64 fade-in">
@@ -1169,7 +1169,7 @@ function renderTokenStatsTab(data, d) {
         <div class="flex items-center justify-between mb-1.5">
           <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full ${dotColor}"></span><span class="text-sm font-medium font-mono ${cls.text()}">${model}</span></div>
           <div class="flex items-center gap-4 text-xs ${cls.textSub()}">
-            <span><i class="fas fa-hashtag mr-1 text-[10px]"></i>${stats.count} 次</span>
+            <span>${stats.count} 次</span>
             <span><i class="fas fa-coins mr-1 text-[10px]"></i>${fmtQuotaShort(stats.quota)}</span>
             <span><i class="fas fa-clock mr-1 text-[10px]"></i>~${stats.avgTime}s</span>
           </div>
