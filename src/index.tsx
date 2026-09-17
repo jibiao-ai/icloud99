@@ -102,7 +102,22 @@ app.get('/api/iq-tests', async (c) => {
   sql += ' ORDER BY tested_at DESC LIMIT ?'
   params.push(limit)
   const results = await db.prepare(sql).bind(...params).all()
-  return c.json({ code: 0, data: results.results || [] })
+  // Return image_url (which now contains SVG code) but limit size for list view
+  const data = (results.results || []).map((r: any) => ({
+    ...r,
+    has_svg: !!(r.image_url && r.image_url.includes('<svg')),
+    image_url: r.image_url && r.image_url.includes('<svg') ? '' : r.image_url // Don't send full SVG in list, use svg endpoint
+  }))
+  return c.json({ code: 0, data })
+})
+
+// Get SVG content for a specific IQ test
+app.get('/api/iq-tests/:id/svg', async (c) => {
+  const id = c.req.param('id')
+  const db = c.env.DB
+  const result = await db.prepare('SELECT image_url FROM iq_tests WHERE id = ?').bind(id).first()
+  if (!result || !result.image_url) return c.json({ code: -1, message: '无SVG内容' })
+  return c.json({ code: 0, data: { svg: result.image_url } })
 })
 
 app.get('/api/iq-tests/stats', async (c) => {
@@ -235,18 +250,25 @@ async function runCandyTest(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { result: 'degraded', score: 0, rawResponse: `Error: ${e.message}`, reasoningTokens: 0, inputTokens: 0, outputTokens: 0, responseTime: Date.now() - startTime } }
 }
 
-// Generate parrot image
-async function generateParrotImage(baseUrl: string, apiKey: string, model: string, tier: string) {
+// Generate pelican-bicycle SVG (community benchmark: Simon Willison)
+// Prompt: "Generate an SVG of a pelican riding a bicycle"
+const PELICAN_SVG_PROMPT = `Generate an SVG of a pelican riding a bicycle. Output ONLY the raw SVG code starting with <svg and ending with </svg>. Do not include any explanation, markdown, or code fences. The SVG should have a viewBox of "0 0 400 400" and be self-contained.`
+
+async function generatePelicanSVG(baseUrl: string, apiKey: string, model: string) {
   try {
-    const resp = await fetch(baseUrl + '/v1/images/generations', {
+    const resp = await fetch(baseUrl + '/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'dall-e-3', prompt: `一只可爱的鹈鹕骑着自行车在海边公路上奔驰，阳光明媚，微风拂面，水彩画风格，温暖柔和的色调，文字"${tier.toUpperCase()} · 向着微风，出发。"`, n: 1, size: '1024x1024' }),
-      signal: AbortSignal.timeout(60000)
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: PELICAN_SVG_PROMPT }], max_tokens: 8192, stream: false }),
+      signal: AbortSignal.timeout(120000)
     })
     if (!resp.ok) return null
     const data: any = await resp.json()
-    return data.data?.[0]?.url || null
+    let content = data.choices?.[0]?.message?.content || ''
+    // Extract SVG from response (may have markdown fences)
+    const svgMatch = content.match(/<svg[\s\S]*?<\/svg>/i)
+    if (svgMatch) return svgMatch[0]
+    return null
   } catch { return null }
 }
 
@@ -256,15 +278,16 @@ app.post('/api/run-iq-test', async (c) => {
   const config = await db.prepare('SELECT * FROM api_configs WHERE provider = ? AND tier = ?').bind(provider || 'openai', tier || 'lite').first()
   if (!config) return c.json({ code: -1, message: `未配置 ${provider}/${tier} 分组的API密钥，请先在管理设置中配置` }, 400)
   const cfg = JSON.parse(config.config_json as string)
-  const result = await runCandyTest(cfg.url, cfg.key, model)
   
-  // Try to generate parrot image
-  let imageUrl = null
-  try { imageUrl = await generateParrotImage(cfg.url, cfg.key, model, tier) } catch {}
+  // Run candy test + pelican SVG generation in parallel
+  const [result, svgContent] = await Promise.all([
+    runCandyTest(cfg.url, cfg.key, model),
+    generatePelicanSVG(cfg.url, cfg.key, model)
+  ])
   
-  await db.prepare(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, tested_at) VALUES (?, ?, ?, 'parrot', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
-    .bind(provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, imageUrl || '').run()
-  return c.json({ code: 0, data: { ...result, imageUrl } })
+  await db.prepare(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
+    .bind(provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, svgContent || '').run()
+  return c.json({ code: 0, data: { ...result, svgContent } })
 })
 
 // ===== Seed with REAL keys =====
