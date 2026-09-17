@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    container_name: yuanqing-ai
+    ports:
+      - "3000:3000"
+    volumes:
+      - yuanqing-d1-data:/app/.wrangler/state/v3/d1
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: unless-stopped
+
+volumes:
+  yuanqing-d1-data:
+    driver: local
