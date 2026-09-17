@@ -1,10 +1,12 @@
-// ===== 元擎智算可视化 v2 =====
+// ===== 元擎智算可视化 v2.1 =====
 const store = {
   theme: localStorage.getItem('theme') || 'light',
   currentPage: 'channel-status',
   token: localStorage.getItem('token') || '',
   user: null,
   sidebarOpen: window.innerWidth > 768,
+  iqPage: 1,
+  iqTotalPages: 1,
   setTheme(t) { this.theme = t; localStorage.setItem('theme', t); document.documentElement.setAttribute('data-theme', t); render(); },
   setPage(p) { this.currentPage = p; render(); },
   setToken(t) { this.token = t; localStorage.setItem('token', t); },
@@ -67,6 +69,7 @@ const api = {
 
 // ===== Helpers =====
 const isDark = () => store.theme === 'dark';
+const isLoggedIn = () => !!store.token;
 const cls = {
   card: () => `rounded-xl border shadow-sm transition-shadow hover:shadow-md ${isDark() ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`,
   text: () => isDark() ? 'text-slate-200' : 'text-gray-800',
@@ -75,6 +78,7 @@ const cls = {
   input: () => `px-3 py-2.5 rounded-lg border text-sm transition-all ${isDark() ? 'bg-slate-700/80 border-slate-600 text-slate-200 placeholder-slate-500' : 'bg-white border-gray-300 text-gray-800 placeholder-gray-400'}`,
   btn: () => `px-4 py-2.5 rounded-lg text-sm font-medium transition-all bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white shadow-sm`,
   btnSec: () => `px-4 py-2.5 rounded-lg text-sm font-medium transition-all border ${isDark() ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`,
+  btnDisabled: () => `px-4 py-2.5 rounded-lg text-sm font-medium transition-all bg-gradient-to-r from-gray-300 to-gray-400 text-gray-100 cursor-not-allowed opacity-60`,
 };
 function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -93,7 +97,6 @@ const tierLabel = (t) => ({ lite: 'Lite', standard: 'Standard', ultra: 'Ultra' }
 const tierColor = (t) => ({ lite: 'from-blue-400 to-cyan-500', standard: 'from-violet-500 to-purple-600', ultra: 'from-amber-500 to-orange-600' }[t] || 'from-gray-400 to-gray-500');
 const tierBadge = (t) => `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold text-white bg-gradient-to-r ${tierColor(t)} shadow-sm">${tierLabel(t)}</span>`;
 
-// Generate a 12+ char hex account ID from test id + timestamp
 function genAccountId(id, testedAt) {
   let hash = 0x9e3779b9;
   const str = String(id) + (testedAt || '') + String(id * 2654435761);
@@ -111,7 +114,6 @@ function genAccountId(id, testedAt) {
   return a + b;
 }
 
-// Format date for modal: MM/DD HH:mm:ss
 function fmtDateFull(dateStr) {
   try {
     const d = new Date(dateStr);
@@ -124,40 +126,40 @@ function fmtDateFull(dateStr) {
   } catch { return dateStr || ''; }
 }
 
-// Scope SVG CSS to avoid conflicts when multiple SVGs are on the same page
 function scopeSvgForCard(svgCode, id) {
   const uid = 'sv' + id;
   let s = svgCode;
-  // Remove fixed width/height, keep viewBox
   s = s.replace(/(<svg[^>]*?)\s+width\s*=\s*["'][^"']*["']/gi, '$1');
   s = s.replace(/(<svg[^>]*?)\s+height\s*=\s*["'][^"']*["']/gi, '$1');
-  // Set responsive sizing
   s = s.replace(/<svg/i, `<svg width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="display:block"`);
-  // Scope id/href/url references
   s = s.replace(/id="([^"]*)"/gi, `id="${uid}_$1"`);
   s = s.replace(/href="#([^"]*)"/gi, `href="#${uid}_$1"`);
   s = s.replace(/url\(#([^)]*)\)/gi, `url(#${uid}_$1)`);
   s = s.replace(/aria-labelledby="([^"]*)"/gi, (m, ids) => {
     return `aria-labelledby="${ids.split(/\s+/).map(i => uid + '_' + i).join(' ')}"`;
   });
-  // Scope class names in elements
   s = s.replace(/class="([^"]*)"/gi, (match, classes) => {
     const scoped = classes.split(/\s+/).map(c => c ? uid + '_' + c : '').join(' ');
     return `class="${scoped}"`;
   });
-  // Scope CSS inside <style>: class selectors + @keyframes names + animation references
   s = s.replace(/<style>([\s\S]*?)<\/style>/gi, (match, css) => {
     let sc = css;
-    // Scope .classname selectors
     sc = sc.replace(/\.([a-zA-Z][\w-]*)/g, '.' + uid + '_$1');
-    // Scope @keyframes names
     sc = sc.replace(/@keyframes\s+([\w-]+)/g, '@keyframes ' + uid + '_$1');
-    // Scope animation: name references
     sc = sc.replace(/animation:\s*([\w-]+)/g, (m, name) => 'animation: ' + uid + '_' + name);
-    // Scope animation-delay stays unchanged (it's a time value)
     return `<style>${sc}</style>`;
   });
   return s;
+}
+
+// ===== Auth Guard Helper =====
+function requireLogin(actionName) {
+  if (!isLoggedIn()) {
+    toast(`请先登录后再${actionName || '操作'}`, 'warning');
+    store.setPage('admin-settings');
+    return false;
+  }
+  return true;
 }
 
 // ===== CHANNEL STATUS PAGE =====
@@ -169,7 +171,7 @@ async function renderChannelStatus() {
     ct.innerHTML = `<div class="text-center py-20 fade-in"><div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/20 flex items-center justify-center mx-auto mb-4"><i class="fas fa-satellite-dish text-3xl text-primary-500"></i></div><p class="${cls.text()} text-lg font-semibold">尚未配置渠道</p><p class="${cls.textSub()} text-sm mt-2 mb-6">请先登录管理员账号，初始化数据并配置API密钥</p><button onclick="store.setPage('admin-settings')" class="${cls.btn()}"><i class="fas fa-cog mr-2"></i>前往管理设置</button></div>`;
     return;
   }
-  // Group by provider then tier
+
   const providers = ['openai', 'anthropic'];
   const tiers = ['lite', 'standard', 'ultra'];
   const providerInfo = { openai: { label: 'OpenAI', icon: '✦', color: 'text-emerald-500' }, anthropic: { label: 'Anthropic', icon: '✸', color: 'text-orange-500' } };
@@ -179,10 +181,14 @@ async function renderChannelStatus() {
   const status = avgRate >= 95 ? 'OPERATIONAL' : avgRate >= 80 ? 'DEGRADED' : 'OUTAGE';
   const sColor = status === 'OPERATIONAL' ? 'text-emerald-500 bg-emerald-500/10' : status === 'DEGRADED' ? 'text-amber-500 bg-amber-500/10' : 'text-red-500 bg-red-500/10';
 
+  const loggedIn = isLoggedIn();
+  const testBtnClass = loggedIn ? cls.btn() : cls.btnDisabled();
+  const testBtnAction = loggedIn ? 'onclick="runChannelTests()"' : 'onclick="requireLogin(\'检测\')"';
+
   let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
     <div class="flex items-center gap-3"><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-satellite-dish mr-2 text-primary-500"></i>渠道状态</h2><span class="${sColor} px-3 py-1 rounded-full text-xs font-bold">${status}</span></div>
     <div class="flex items-center gap-2">
-      <button onclick="runChannelTests()" class="${cls.btn()} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测</button>
+      <button ${testBtnAction} class="${testBtnClass} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测${!loggedIn ? ' 🔒' : ''}</button>
       <button onclick="renderChannelStatus()" class="px-3 py-2 rounded-lg text-xs ${isDark() ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"><i class="fas fa-sync-alt"></i></button>
       <span class="${cls.textMuted()} text-xs"><i class="fas fa-clock mr-1"></i>每小时自动检测</span>
     </div></div>`;
@@ -206,28 +212,135 @@ async function renderChannelStatus() {
   ct.innerHTML = html;
 }
 
+function getBarColor(responseTime, ping, success) {
+  if (!success) return '#ef4444'; // red for failures
+  // For response time based coloring
+  if (responseTime <= 25000 && ping <= 1500) return '#10b981'; // green
+  if (responseTime >= 50000 || ping >= 3000) return '#ef4444'; // red
+  return '#f59e0b'; // orange
+}
+
+function getSpeedLabel(responseTime, ping) {
+  if (responseTime <= 0) return { label: '未知', color: 'text-gray-400', dot: 'bg-gray-400' };
+  if (responseTime <= 25000 && ping <= 1500) return { label: '极速', color: isDark() ? 'text-emerald-400' : 'text-emerald-600', dot: 'bg-emerald-400' };
+  if (responseTime >= 50000 || ping >= 3000) return { label: '拥堵', color: 'text-red-500', dot: 'bg-red-400' };
+  return { label: '较慢', color: 'text-amber-500', dot: 'bg-amber-400' };
+}
+
 function renderChannelCard(ch) {
   const lt = ch.latest_test;
   const rate = ch.success_rate;
   const rateColor = rate >= 95 ? 'text-emerald-500' : rate >= 80 ? 'text-amber-500' : 'text-red-500';
-  const speedLabel = lt && lt.response_time_ms > 0 ? (lt.response_time_ms < 2000 ? '极速' : lt.response_time_ms < 4000 ? '正常' : '较慢') : '未知';
-  const speedDot = speedLabel === '极速' ? 'bg-emerald-400' : speedLabel === '正常' ? 'bg-blue-400' : 'bg-amber-400';
-  const bars = (ch.history || []).map(h => {
-    const height = h.success ? Math.max(4, Math.min(32, h.response_time / 100)) : 2;
-    const color = !h.success ? '#ef4444' : h.response_time < 2000 ? '#10b981' : h.response_time < 4000 ? '#f59e0b' : '#ef4444';
-    return `<div class="bar" style="height:${height}px;background:${color}" data-tooltip="${timeAgo(h.time)} · ${h.success ? '正常' : '失败'} · ${h.response_time}ms" onmouseenter="showTooltip(event,this)" onmouseleave="hideTooltip()"></div>`;
-  }).join('');
+  const responseTime = lt ? lt.response_time_ms : 0;
+  const pingTime = lt ? lt.ping_ms : 0;
+  const speed = getSpeedLabel(responseTime, pingTime);
+  const rateMultiplier = ch.rate_multiplier || 1.0;
 
-  return `<div class="${cls.card()} p-4 fade-in">
+  // Build 60-slot bar chart: fill existing data, pad with gray
+  const history = ch.history || [];
+  const TOTAL_BARS = 60;
+  let bars = '';
+  for (let i = 0; i < TOTAL_BARS; i++) {
+    if (i < history.length) {
+      const h = history[i];
+      const height = h.success ? Math.max(4, Math.min(32, h.response_time / 100)) : 2;
+      const color = getBarColor(h.response_time, h.ping || 0, h.success);
+      bars += `<div class="bar" style="height:${height}px;background:${color}" data-tooltip="${timeAgo(h.time)} · ${h.success ? '正常' : '失败'} · ${h.response_time}ms" onmouseenter="showTooltip(event,this)" onmouseleave="hideTooltip()"></div>`;
+    } else {
+      // Gray placeholder for unfilled slots
+      bars += `<div class="bar" style="height:4px;background:${isDark() ? '#334155' : '#d1d5db'}" data-tooltip="暂无数据" onmouseenter="showTooltip(event,this)" onmouseleave="hideTooltip()"></div>`;
+    }
+  }
+
+  // Speed badge color
+  const speedBadgeColor = speed.label === '极速' ? (isDark() ? 'bg-emerald-900/50 text-emerald-400 border-emerald-700/50' : 'bg-emerald-50 text-emerald-600 border-emerald-200')
+    : speed.label === '较慢' ? (isDark() ? 'bg-amber-900/50 text-amber-400 border-amber-700/50' : 'bg-amber-50 text-amber-600 border-amber-200')
+    : speed.label === '拥堵' ? (isDark() ? 'bg-red-900/50 text-red-400 border-red-700/50' : 'bg-red-50 text-red-600 border-red-200')
+    : (isDark() ? 'bg-slate-700 text-slate-400 border-slate-600' : 'bg-gray-100 text-gray-500 border-gray-200');
+
+  return `<div class="${cls.card()} p-4 fade-in cursor-pointer" onclick="showChannelDetail(${ch.id})">
     <div class="flex items-start justify-between mb-3"><div class="flex items-center gap-2"><span class="text-lg">${ch.icon||'📡'}</span><div><h4 class="text-sm font-semibold ${cls.text()}">${ch.name}</h4><p class="${cls.textMuted()} text-xs font-mono">${ch.model_id}</p></div></div>
-    <span class="flex items-center gap-1 text-xs ${isDark()?'text-emerald-400':'text-emerald-600'}"><span class="w-1.5 h-1.5 rounded-full ${speedDot} pulse-dot"></span>${speedLabel}</span></div>
-    <div class="flex items-end justify-between mb-3"><div class="flex gap-4 text-xs"><div><span class="${cls.textMuted()}">延迟</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.response_time_ms:'-'}ms</span></div><div><span class="${cls.textMuted()}">PING</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.ping_ms:'-'}ms</span></div></div>
+    <div class="flex items-center gap-2">
+      <span class="${cls.textMuted()} text-[11px] font-mono">倍率:${rateMultiplier}x</span>
+      <span class="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${speedBadgeColor}"><span class="w-1.5 h-1.5 rounded-full ${speed.dot} pulse-dot"></span>${speed.label}</span>
+    </div></div>
+    <div class="flex items-end justify-between mb-3"><div class="flex gap-4 text-xs"><div><span class="${cls.textMuted()}">对话延迟</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.response_time_ms:'-'}ms</span></div><div><span class="${cls.textMuted()}">端点 PING</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.ping_ms:'-'}ms</span></div></div>
     <span class="text-2xl font-bold ${rateColor}">${rate}%</span></div>
     <div class="flex items-center justify-between mb-1"><span class="${cls.textMuted()} text-xs">${ch.total_tests}次检测</span></div>
     <div class="bar-chart-mini">${bars}</div></div>`;
 }
 
+// ===== Channel Detail Modal =====
+window.showChannelDetail = async function(channelId) {
+  const d = isDark();
+  const root = document.getElementById('modal-root');
+  // Show loading first
+  root.innerHTML = `
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
+      <div class="w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()">
+        <div class="p-8 flex items-center justify-center"><div class="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div></div>
+      </div>
+    </div>`;
+
+  try {
+    const resp = await api.get(`/channels/${channelId}/detail`);
+    if (resp.code !== 0) { closeModal(); toast('获取渠道详情失败', 'error'); return; }
+    const data = resp.data;
+    const ch = data.channel;
+
+    const statusColor = data.latest_status === '正常'
+      ? (d ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700')
+      : (d ? 'bg-red-900/50 text-red-400' : 'bg-red-100 text-red-700');
+
+    root.innerHTML = `
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
+      <div class="w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between px-6 py-4 border-b ${d ? 'border-slate-700' : 'border-gray-200'}">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">${ch.icon || '📡'}</span>
+            <h3 class="text-base font-bold ${cls.text()}">${ch.name}</h3>
+          </div>
+          <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b ${d ? 'border-slate-700' : 'border-gray-200'}">
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">模型</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">最新状态</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">最新延迟 (MS)</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">7 天可用率</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">15 天可用率</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">30 天可用率</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">7 天平均延迟 (MS)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="py-3 font-mono ${cls.text()}">${ch.model_id}</td>
+                <td class="py-3"><span class="px-2 py-1 rounded text-xs font-medium ${statusColor}">${data.latest_status}</span></td>
+                <td class="py-3 font-mono ${cls.text()}">${data.latest_latency}</td>
+                <td class="py-3 font-mono ${cls.text()}">${data.availability_7d}</td>
+                <td class="py-3 font-mono ${cls.text()}">${data.availability_15d}</td>
+                <td class="py-3 font-mono ${cls.text()}">${data.availability_30d}</td>
+                <td class="py-3 font-mono ${cls.text()}">${data.avg_latency_7d}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="px-6 pb-5 flex justify-end">
+          <button onclick="closeModal()" class="px-5 py-2 rounded-lg text-sm font-medium border ${d ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}">关闭</button>
+        </div>
+      </div>
+    </div>`;
+  } catch (e) {
+    closeModal();
+    toast('获取渠道详情失败: ' + e.message, 'error');
+  }
+};
+
 window.runChannelTests = async function() {
+  if (!requireLogin('检测')) return;
   toast('正在检测所有渠道...', 'info', 5000);
   const resp = await api.post('/test-channels', {});
   if (resp.code === 0) { toast(`检测完成！共 ${resp.data.length} 个渠道`, 'success'); renderChannelStatus(); }
@@ -243,17 +356,27 @@ function renderIQRadar() {
     <div class="${cls.card()} overflow-hidden" style="height:calc(100vh - 160px)"><iframe id="iq-radar-frame" src="${radarUrl}" class="w-full h-full border-0" allow="fullscreen" loading="lazy"></iframe></div>`;
 }
 
-// ===== IQ TEST PAGE =====
-async function renderIQTest() {
+// ===== IQ TEST PAGE (with pagination: 2 rows x 6 columns = 12 per page) =====
+async function renderIQTest(page) {
   const ct = document.getElementById('page-content');
   ct.innerHTML = `<div class="flex items-center justify-center h-64"><div class="w-10 h-10 border-3 border-primary-500 border-t-transparent rounded-full animate-spin"></div></div>`;
-  const [testsResp, statsResp] = await Promise.all([api.get('/iq-tests?limit=100'), api.get('/iq-tests/stats')]);
-  const tests = testsResp.data || [];
-  const stats = statsResp.data || [];
+  const currentPage = page || store.iqPage || 1;
+  const pageSize = 12; // 2 rows x 6 columns
 
+  const [pagedResp, statsResp] = await Promise.all([
+    api.get(`/iq-tests-paged?page=${currentPage}&pageSize=${pageSize}`),
+    api.get('/iq-tests/stats')
+  ]);
+  const pagedData = pagedResp.data || {};
+  const tests = pagedData.list || [];
+  const total = pagedData.total || 0;
+  const totalPages = pagedData.totalPages || 1;
+  store.iqPage = currentPage;
+  store.iqTotalPages = totalPages;
+
+  const stats = statsResp.data || [];
   const tiers = ['lite', 'standard', 'ultra'];
 
-  // Group stats by tier
   const tierStats = {};
   stats.forEach(s => {
     if (!tierStats[s.tier]) tierStats[s.tier] = { pass: 0, works: 0, degraded: 0, total: 0 };
@@ -261,18 +384,24 @@ async function renderIQTest() {
     tierStats[s.tier].total += s.count;
   });
 
+  const loggedIn = isLoggedIn();
+
   let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
     <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-xs mt-1">Codex Candy Eval + Pelican Bicycle · 每3小时轮转 Lite → Standard → Ultra</p></div>
-    <div class="flex gap-2">
-      <button onclick="runIQTestForTier('lite')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Lite</button>
+    <div class="flex gap-2">`;
+
+  if (loggedIn) {
+    html += `<button onclick="runIQTestForTier('lite')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Lite</button>
       <button onclick="runIQTestForTier('standard')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Standard</button>
-      <button onclick="runIQTestForTier('ultra')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Ultra</button>
-    </div></div>`;
+      <button onclick="runIQTestForTier('ultra')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Ultra</button>`;
+  } else {
+    html += `<button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Lite 🔒</button>
+      <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Standard 🔒</button>
+      <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Ultra 🔒</button>`;
+  }
+  html += `</div></div>`;
 
   // Summary stats bar
-  const totalAll = Object.values(tierStats).reduce((a, s) => a + s.total, 0);
-  const passAll = Object.values(tierStats).reduce((a, s) => a + s.pass, 0);
-  const overallRate = totalAll > 0 ? Math.round(passAll / totalAll * 100) : 0;
   html += `<div class="grid grid-cols-3 gap-3 mb-6">${tiers.map(tier => {
     const st = tierStats[tier] || { pass: 0, works: 0, degraded: 0, total: 0 };
     const rate = st.total > 0 ? Math.round(st.pass / st.total * 100) : 0;
@@ -284,10 +413,10 @@ async function renderIQTest() {
   }).join('')}</div>`;
 
   // Store SVG data for modal access
-  window.__iqTestSVGs = {};
+  window.__iqTestSVGs = window.__iqTestSVGs || {};
 
-  // Grid cards for all test results
-  if (tests.length === 0) {
+  // Grid cards - 2 rows x 6 columns = 12 per page
+  if (tests.length === 0 && currentPage === 1) {
     html += `<div class="text-center py-16 fade-in"><div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/20 flex items-center justify-center mx-auto mb-3"><i class="fas fa-bicycle text-2xl text-primary-500"></i></div><p class="${cls.text()} font-semibold">尚无检测记录</p><p class="${cls.textSub()} text-sm mt-1">点击上方按钮开始鹈鹕骑行智力检测</p></div>`;
   } else {
     html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">`;
@@ -300,16 +429,10 @@ async function renderIQTest() {
       const timeStr = fmtTime(t.tested_at);
       const elapsed = (t.response_time_ms / 1000).toFixed(1);
       const accountId = genAccountId(t.id, t.tested_at);
-      const modalDate = fmtDateFull(t.tested_at);
 
-      // Store SVG code for modal access (avoid inline onclick with huge SVG data)
       if (hasSvg) window.__iqTestSVGs[t.id] = t.svg_code;
-
-      // Prepare SVG for inline card: scope CSS classes to avoid conflicts between cards
       let cardSvg = '';
-      if (hasSvg) {
-        cardSvg = scopeSvgForCard(t.svg_code, t.id);
-      }
+      if (hasSvg) cardSvg = scopeSvgForCard(t.svg_code, t.id);
 
       html += `<div class="${cls.card()} overflow-hidden fade-in group cursor-pointer" onclick="showPelicanModal(${t.id})">
         <div class="flex items-center justify-between px-2.5 py-1.5 text-[10px] ${isDark()?'bg-slate-700/50 text-slate-400':'bg-gray-50/80 text-gray-500'} border-b ${isDark()?'border-slate-700/50':'border-gray-100'}">
@@ -332,12 +455,87 @@ async function renderIQTest() {
       </div>`;
     });
     html += `</div>`;
-  }
-  // Store all tests data for modal reference
-  window.__iqTests = tests;
 
+    // Pagination controls
+    if (totalPages > 1) {
+      html += renderPagination(currentPage, totalPages, total);
+    }
+  }
+  window.__iqTests = tests;
   ct.innerHTML = html;
 }
+
+function renderPagination(currentPage, totalPages, total) {
+  const d = isDark();
+  const btnBase = `px-3 py-2 rounded-lg text-sm font-medium transition-all`;
+  const btnActive = `${btnBase} bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm`;
+  const btnNormal = `${btnBase} ${d ? 'text-slate-300 hover:bg-slate-700 border border-slate-600' : 'text-gray-700 hover:bg-gray-100 border border-gray-300'}`;
+  const btnDisabledCls = `${btnBase} ${d ? 'text-slate-600 border border-slate-700 cursor-not-allowed' : 'text-gray-300 border border-gray-200 cursor-not-allowed'}`;
+
+  let pages = [];
+  // Always show first page
+  pages.push(1);
+  // Show pages around current
+  let start = Math.max(2, currentPage - 2);
+  let end = Math.min(totalPages - 1, currentPage + 2);
+  if (start > 2) pages.push('...');
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (end < totalPages - 1) pages.push('...');
+  // Always show last page
+  if (totalPages > 1) pages.push(totalPages);
+
+  let html = `<div class="flex items-center justify-center gap-2 mt-8 mb-4 flex-wrap">`;
+
+  // First page button
+  html += `<button onclick="goIQPage(1)" ${currentPage === 1 ? 'disabled' : ''} class="${currentPage === 1 ? btnDisabledCls : btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
+
+  // Previous button
+  html += `<button onclick="goIQPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="${currentPage === 1 ? btnDisabledCls : btnNormal}" title="上一页"><i class="fas fa-angle-left text-xs"></i></button>`;
+
+  // Page numbers
+  for (const p of pages) {
+    if (p === '...') {
+      html += `<span class="px-2 py-2 text-sm ${cls.textMuted()}">…</span>`;
+    } else {
+      html += `<button onclick="goIQPage(${p})" class="${p === currentPage ? btnActive : btnNormal}">${p}</button>`;
+    }
+  }
+
+  // Next button
+  html += `<button onclick="goIQPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="${currentPage === totalPages ? btnDisabledCls : btnNormal}" title="下一页"><i class="fas fa-angle-right text-xs"></i></button>`;
+
+  // Last page button
+  html += `<button onclick="goIQPage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''} class="${currentPage === totalPages ? btnDisabledCls : btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
+
+  // Page jump input
+  html += `<div class="flex items-center gap-2 ml-4">
+    <span class="${cls.textSub()} text-sm">跳至</span>
+    <input id="iq-page-jump" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')jumpIQPage()">
+    <span class="${cls.textSub()} text-sm">页</span>
+    <button onclick="jumpIQPage()" class="${btnNormal} !px-3 !py-1.5">GO</button>
+  </div>`;
+
+  // Total info
+  html += `<span class="${cls.textMuted()} text-xs ml-3">共 ${total} 条 / ${totalPages} 页</span>`;
+  html += `</div>`;
+  return html;
+}
+
+window.goIQPage = function(page) {
+  if (page < 1) page = 1;
+  if (page > store.iqTotalPages) page = store.iqTotalPages;
+  store.iqPage = page;
+  renderIQTest(page);
+};
+
+window.jumpIQPage = function() {
+  const input = document.getElementById('iq-page-jump');
+  if (!input) return;
+  let page = parseInt(input.value);
+  if (isNaN(page) || page < 1) page = 1;
+  if (page > store.iqTotalPages) page = store.iqTotalPages;
+  goIQPage(page);
+};
 
 function getNextRunTime(tier) {
   const tiers = ['lite', 'standard', 'ultra'];
@@ -354,6 +552,7 @@ function getNextRunTime(tier) {
 }
 
 window.runIQTestForTier = async function(tier) {
+  if (!requireLogin('检测')) return;
   toast(`正在为 ${tierLabel(tier)} 分组运行鹈鹕骑行检测...`, 'info', 10000);
   const models = ['gpt-5.6-sol', 'gpt-6-astra'];
   for (const model of models) {
@@ -366,7 +565,7 @@ window.runIQTestForTier = async function(tier) {
       } else { toast(`${model} [${tierLabel(tier)}]: ${resp.message}`, 'error'); }
     } catch (e) { toast(`${model} 测试出错: ${e.message}`, 'error'); }
   }
-  renderIQTest();
+  renderIQTest(1);
 };
 
 // ===== ADMIN SETTINGS PAGE =====
@@ -490,7 +689,7 @@ window.doDeleteConfig = async function(id) {
 };
 
 window.doInitSeed = async function() {
-  showModal('初始化数据', `<div class="space-y-3"><p>此操作将：</p><ul class="list-disc pl-5 space-y-1 text-sm"><li>配置 OpenAI 3组密钥（Lite / Standard / Ultra）</li><li>创建 12 个检测渠道（OpenAI + Anthropic 各6个）</li><li>清空现有渠道和检测数据</li></ul><p class="text-xs ${cls.textMuted()} mt-2">Anthropic 密钥需要手动配置。</p></div>`,
+  showModal('初始化数据', `<div class="space-y-3"><p>此操作将：</p><ul class="list-disc pl-5 space-y-1 text-sm"><li>配置 OpenAI 3组密钥（Lite / Standard / Ultra）</li><li>创建 24 个检测渠道（OpenAI + Anthropic 各12个）</li><li>清空现有渠道和检测数据</li></ul><p class="text-xs ${cls.textMuted()} mt-2">Anthropic 密钥需要手动配置。</p></div>`,
     [{ label: '<i class="fas fa-database mr-1"></i>确认初始化', action: 'doSeed()' }]);
 };
 
@@ -521,14 +720,13 @@ window.doChangePassword = async function() {
   const resp = await api.post('/admin/change-password', { currentPassword: current, newPassword: newPw });
   if (resp.code === 0) {
     toast(resp.message, 'success', 5000);
-    // Clear the fields
     document.getElementById('pw-current').value = '';
     document.getElementById('pw-new').value = '';
     document.getElementById('pw-confirm').value = '';
   } else { toast(resp.message || '修改失败', 'error'); }
 };
 
-// ===== Pelican Animation Preview Modal (SVG + image support) =====
+// ===== Pelican Animation Preview Modal =====
 window.showPelicanModal = function(testId) {
   const d = isDark();
   const tests = window.__iqTests || [];
@@ -542,7 +740,6 @@ window.showPelicanModal = function(testId) {
   const dateStr = fmtDateFull(t.tested_at);
   const tierText = tierLabel(t.tier);
 
-  // Prepare SVG for modal display - scope it to avoid conflicts with cards
   let modalSvg = '';
   if (hasSvg) {
     modalSvg = scopeSvgForCard(window.__iqTestSVGs[testId], 'modal' + testId);
@@ -552,12 +749,10 @@ window.showPelicanModal = function(testId) {
   root.innerHTML = `
     <div class="fixed inset-0 bg-black/60 backdrop-blur-md z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
       <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()" style="max-height:90vh;display:flex;flex-direction:column">
-        <!-- Header -->
         <div class="flex items-center justify-between px-5 py-3.5 border-b ${d ? 'border-slate-700' : 'border-gray-200'} flex-shrink-0">
           <h3 class="text-base font-semibold ${cls.text()}">鹈鹕骑行 · 动画预览</h3>
           <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times text-sm"></i></button>
         </div>
-        <!-- Animation content -->
         <div class="flex-1 overflow-auto">
           <div class="p-4 pb-2">
             ${hasSvg
@@ -573,7 +768,6 @@ window.showPelicanModal = function(testId) {
                     <span class="${cls.textSub()} text-sm">暂无骑行动画</span>
                   </div>`}
           </div>
-          <!-- Metadata footer -->
           <div class="px-4 pb-4">
             <div class="flex items-center justify-center flex-wrap gap-1.5 text-xs ${d ? 'text-slate-500' : 'text-gray-400'} font-mono">
               <span>账号 ID: ${accountId}</span>
@@ -622,7 +816,7 @@ function render() {
         <nav class="flex-1 p-2.5 space-y-1 overflow-y-auto scrollbar-thin">
           ${MENU.map(m => `<button onclick="store.setPage('${m.id}')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${store.currentPage===m.id?(d?'bg-primary-600/20 text-primary-400 font-medium':'bg-primary-50 text-primary-700 font-medium'):(d?'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200':'text-gray-600 hover:bg-gray-100 hover:text-gray-800')}"><i class="${m.icon} w-4 text-center"></i><span>${m.label}</span>${m.id==='admin-settings'?`<i class="fas fa-lock text-[10px] ml-auto ${cls.textMuted()}"></i>`:''}</button>`).join('')}
         </nav>
-        <div class="p-3 border-t ${d?'border-slate-700':'border-gray-200'}"><div class="flex items-center gap-2 text-[10px] ${cls.textMuted()}"><i class="fas fa-shield-alt"></i><span>New API · v2.0</span></div></div>
+        <div class="p-3 border-t ${d?'border-slate-700':'border-gray-200'}"><div class="flex items-center gap-2 text-[10px] ${cls.textMuted()}"><i class="fas fa-shield-alt"></i><span>New API · v2.1</span></div></div>
       </aside>
       <main class="flex-1 flex flex-col overflow-hidden">
         <header class="h-14 flex items-center justify-between px-4 border-b ${d?'bg-slate-800/80 border-slate-700':'bg-white/80 border-gray-200'} glass flex-shrink-0">

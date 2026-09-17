@@ -312,27 +312,102 @@ app.post('/api/admin/seed', authMiddleware, async (c) => {
 
   // Create channels grouped by provider+tier+model
   const channels = [
-    // OpenAI - each tier has both models
+    // OpenAI - each tier has 4 models
     { name: 'Lite · GPT-5.6-SOL', provider: 'openai', tier: 'lite', model_id: 'gpt-5.6-sol', icon: '⚡', sort: 1 },
     { name: 'Lite · GPT-6-ASTRA', provider: 'openai', tier: 'lite', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
+    { name: 'Lite · GPT-5.6-TERRA', provider: 'openai', tier: 'lite', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
+    { name: 'Lite · GPT-IMAGE-2', provider: 'openai', tier: 'lite', model_id: 'gpt-image-2', icon: '🎨', sort: 4 },
     { name: 'Standard · GPT-5.6-SOL', provider: 'openai', tier: 'standard', model_id: 'gpt-5.6-sol', icon: '⚡', sort: 1 },
     { name: 'Standard · GPT-6-ASTRA', provider: 'openai', tier: 'standard', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
+    { name: 'Standard · GPT-5.6-TERRA', provider: 'openai', tier: 'standard', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
+    { name: 'Standard · GPT-IMAGE-2', provider: 'openai', tier: 'standard', model_id: 'gpt-image-2', icon: '🎨', sort: 4 },
     { name: 'Ultra · GPT-5.6-SOL', provider: 'openai', tier: 'ultra', model_id: 'gpt-5.6-sol', icon: '⚡', sort: 1 },
     { name: 'Ultra · GPT-6-ASTRA', provider: 'openai', tier: 'ultra', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
-    // Anthropic - each tier has both models
-    { name: 'Lite · Claude-Opus-4-7', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-7', icon: '✨', sort: 1 },
-    { name: 'Lite · Claude-Opus-4-8', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-8', icon: '🔮', sort: 2 },
-    { name: 'Standard · Claude-Opus-4-7', provider: 'anthropic', tier: 'standard', model_id: 'claude-opus-4-7', icon: '✨', sort: 1 },
-    { name: 'Standard · Claude-Opus-4-8', provider: 'anthropic', tier: 'standard', model_id: 'claude-opus-4-8', icon: '🔮', sort: 2 },
-    { name: 'Ultra · Claude-Opus-4-7', provider: 'anthropic', tier: 'ultra', model_id: 'claude-opus-4-7', icon: '✨', sort: 1 },
-    { name: 'Ultra · Claude-Opus-4-8', provider: 'anthropic', tier: 'ultra', model_id: 'claude-opus-4-8', icon: '🔮', sort: 2 },
+    { name: 'Ultra · GPT-5.6-TERRA', provider: 'openai', tier: 'ultra', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
+    { name: 'Ultra · GPT-IMAGE-2', provider: 'openai', tier: 'ultra', model_id: 'gpt-image-2', icon: '🎨', sort: 4 },
+    // Anthropic - each tier has 4 models
+    { name: 'Lite · Claude-Opus-4-6', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-6', icon: '✨', sort: 1 },
+    { name: 'Lite · Claude-Fable-5', provider: 'anthropic', tier: 'lite', model_id: 'claude-fable-5', icon: '📖', sort: 2 },
+    { name: 'Lite · Claude-Opus-4-7', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-7', icon: '🔮', sort: 3 },
+    { name: 'Lite · Claude-Opus-4-8', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-8', icon: '💎', sort: 4 },
+    { name: 'Standard · Claude-Opus-4-6', provider: 'anthropic', tier: 'standard', model_id: 'claude-opus-4-6', icon: '✨', sort: 1 },
+    { name: 'Standard · Claude-Fable-5', provider: 'anthropic', tier: 'standard', model_id: 'claude-fable-5', icon: '📖', sort: 2 },
+    { name: 'Standard · Claude-Opus-4-7', provider: 'anthropic', tier: 'standard', model_id: 'claude-opus-4-7', icon: '🔮', sort: 3 },
+    { name: 'Standard · Claude-Opus-4-8', provider: 'anthropic', tier: 'standard', model_id: 'claude-opus-4-8', icon: '💎', sort: 4 },
+    { name: 'Ultra · Claude-Opus-4-6', provider: 'anthropic', tier: 'ultra', model_id: 'claude-opus-4-6', icon: '✨', sort: 1 },
+    { name: 'Ultra · Claude-Fable-5', provider: 'anthropic', tier: 'ultra', model_id: 'claude-fable-5', icon: '📖', sort: 2 },
+    { name: 'Ultra · Claude-Opus-4-7', provider: 'anthropic', tier: 'ultra', model_id: 'claude-opus-4-7', icon: '🔮', sort: 3 },
+    { name: 'Ultra · Claude-Opus-4-8', provider: 'anthropic', tier: 'ultra', model_id: 'claude-opus-4-8', icon: '💎', sort: 4 },
   ]
 
   for (const ch of channels) {
     await db.prepare('INSERT INTO channels (name, provider, tier, model_id, icon, rate_multiplier, sort_order) VALUES (?, ?, ?, ?, ?, 1.0, ?)').bind(ch.name, ch.provider, ch.tier, ch.model_id, ch.icon, ch.sort).run()
   }
 
-  return c.json({ code: 0, message: '初始化完成！已配置 OpenAI 3组密钥 + 12个检测渠道。请配置 Anthropic 密钥后使用完整功能。' })
+  return c.json({ code: 0, message: '初始化完成！已配置 OpenAI 3组密钥 + 24个检测渠道。请配置 Anthropic 密钥后使用完整功能。' })
+})
+
+// ===== Channel Detail API =====
+app.get('/api/channels/:id/detail', async (c) => {
+  const db = c.env.DB
+  const channelId = parseInt(c.req.param('id'))
+  const channel = await db.prepare('SELECT * FROM channels WHERE id = ?').bind(channelId).first()
+  if (!channel) return c.json({ code: -1, message: '渠道不存在' }, 404)
+
+  // Get latest test
+  const latest = await db.prepare('SELECT * FROM channel_tests WHERE channel_id = ? ORDER BY tested_at DESC LIMIT 1').bind(channelId).first()
+
+  // 7-day stats
+  const since7 = new Date(Date.now() - 7 * 86400000).toISOString()
+  const stats7 = await db.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count, AVG(CASE WHEN success=1 THEN response_time_ms END) as avg_latency FROM channel_tests WHERE channel_id = ? AND tested_at > ?').bind(channelId, since7).first() as any
+
+  // 15-day stats
+  const since15 = new Date(Date.now() - 15 * 86400000).toISOString()
+  const stats15 = await db.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count FROM channel_tests WHERE channel_id = ? AND tested_at > ?').bind(channelId, since15).first() as any
+
+  // 30-day stats
+  const since30 = new Date(Date.now() - 30 * 86400000).toISOString()
+  const stats30 = await db.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count FROM channel_tests WHERE channel_id = ? AND tested_at > ?').bind(channelId, since30).first() as any
+
+  return c.json({ code: 0, data: {
+    channel,
+    latest_status: latest && (latest as any).success === 1 ? '正常' : '异常',
+    latest_latency: latest ? (latest as any).response_time_ms : 0,
+    latest_ping: latest ? (latest as any).ping_ms : 0,
+    availability_7d: stats7.total > 0 ? ((stats7.success_count / stats7.total) * 100).toFixed(2) + '%' : '-',
+    availability_15d: stats15.total > 0 ? ((stats15.success_count / stats15.total) * 100).toFixed(2) + '%' : '-',
+    availability_30d: stats30.total > 0 ? ((stats30.success_count / stats30.total) * 100).toFixed(2) + '%' : '-',
+    avg_latency_7d: stats7.avg_latency ? Math.round(stats7.avg_latency) : 0,
+  }})
+})
+
+// ===== IQ Tests with pagination =====
+app.get('/api/iq-tests-paged', async (c) => {
+  const db = c.env.DB
+  const page = parseInt(c.req.query('page') || '1')
+  const pageSize = parseInt(c.req.query('pageSize') || '12')
+  const tier = c.req.query('tier') || ''
+  
+  let countSql = 'SELECT COUNT(*) as total FROM iq_tests WHERE 1=1'
+  let sql = 'SELECT id, provider, tier, model, test_type, result, score, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at FROM iq_tests WHERE 1=1'
+  const params: any[] = []
+  const countParams: any[] = []
+  
+  if (tier) {
+    sql += ' AND tier = ?'; params.push(tier)
+    countSql += ' AND tier = ?'; countParams.push(tier)
+  }
+  
+  const countResult = await db.prepare(countSql).bind(...countParams).first() as any
+  const total = countResult?.total || 0
+  const totalPages = Math.ceil(total / pageSize)
+  const offset = (page - 1) * pageSize
+  
+  sql += ' ORDER BY tested_at DESC LIMIT ? OFFSET ?'
+  params.push(pageSize, offset)
+  
+  const results = await db.prepare(sql).bind(...params).all()
+  return c.json({ code: 0, data: { list: results.results || [], total, page, pageSize, totalPages } })
 })
 
 // ===== Frontend =====
