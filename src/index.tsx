@@ -399,6 +399,88 @@ app.get('/api/iq-tests-paged', async (c) => {
   return c.json({ code: 0, data: { list: results, total, page, pageSize, totalPages } })
 })
 
+// ===== Token Usage Query (proxy to New API) =====
+const NEWAPI_BASE = 'https://api.icloud99.cn'
+
+// Token info + quota
+app.post('/api/token-usage/query', async (c) => {
+  const { key } = await c.req.json()
+  if (!key) return c.json({ code: -1, message: '请输入令牌 Key' }, 400)
+
+  try {
+    // 1) Fetch token usage info
+    const usageResp = await fetch(`${NEWAPI_BASE}/api/usage/token/`, {
+      headers: { 'Authorization': `Bearer ${key}` },
+      signal: AbortSignal.timeout(15000)
+    })
+    if (!usageResp.ok) {
+      const err = await usageResp.json().catch(() => ({ message: `HTTP ${usageResp.status}` }))
+      return c.json({ code: -1, message: err.message || '查询失败' })
+    }
+    const usageData: any = await usageResp.json()
+    if (!usageData.code && usageData.code !== true) {
+      return c.json({ code: -1, message: usageData.message || '令牌无效' })
+    }
+
+    // 2) Fetch logs via /api/log/token/ (returns all logs for this token)
+    const logResp = await fetch(`${NEWAPI_BASE}/api/log/token/`, {
+      headers: { 'Authorization': `Bearer ${key}` },
+      signal: AbortSignal.timeout(30000)
+    })
+    let logs: any[] = []
+    if (logResp.ok) {
+      const logData: any = await logResp.json()
+      if (logData.success !== false && Array.isArray(logData.data)) {
+        logs = logData.data
+      }
+    }
+
+    // Parse other field for each log
+    const parsedLogs = logs.map((log: any) => {
+      let other: any = {}
+      try { other = JSON.parse(log.other || '{}') } catch {}
+      return { ...log, other_parsed: other }
+    })
+
+    // Build usage stats by model
+    const modelStats: Record<string, { count: number; quota: number; prompt: number; completion: number; avgTime: number }> = {}
+    for (const log of parsedLogs) {
+      const model = log.model_name || 'unknown'
+      if (!modelStats[model]) modelStats[model] = { count: 0, quota: 0, prompt: 0, completion: 0, avgTime: 0 }
+      modelStats[model].count++
+      modelStats[model].quota += log.quota || 0
+      modelStats[model].prompt += log.prompt_tokens || 0
+      modelStats[model].completion += log.completion_tokens || 0
+      modelStats[model].avgTime += log.use_time || 0
+    }
+    for (const m of Object.keys(modelStats)) {
+      if (modelStats[m].count > 0) modelStats[m].avgTime = Math.round(modelStats[m].avgTime / modelStats[m].count)
+    }
+
+    // Daily usage stats (last 30 days)
+    const dailyStats: Record<string, { count: number; quota: number }> = {}
+    for (const log of parsedLogs) {
+      const date = new Date(log.created_at * 1000).toISOString().slice(0, 10)
+      if (!dailyStats[date]) dailyStats[date] = { count: 0, quota: 0 }
+      dailyStats[date].count++
+      dailyStats[date].quota += log.quota || 0
+    }
+
+    return c.json({
+      code: 0,
+      data: {
+        token_info: usageData.data,
+        logs: parsedLogs,
+        total_logs: parsedLogs.length,
+        model_stats: modelStats,
+        daily_stats: dailyStats
+      }
+    })
+  } catch (e: any) {
+    return c.json({ code: -1, message: '查询失败: ' + e.message })
+  }
+})
+
 // ===== Frontend =====
 app.get('*', (c) => c.html(getIndexHtml()))
 
