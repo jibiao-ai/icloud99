@@ -1,4 +1,4 @@
-// ===== 元擎智算可视化 v2.1 =====
+// ===== 元擎智算可视化 v2.2 =====
 const store = {
   theme: localStorage.getItem('theme') || 'light',
   currentPage: 'channel-status',
@@ -7,6 +7,10 @@ const store = {
   sidebarOpen: window.innerWidth > 768,
   iqPage: 1,
   iqTotalPages: 1,
+  chProvider: 'openai',
+  chPage: 1,
+  chTotalPages: 1,
+  chChannels: null,
   setTheme(t) { this.theme = t; localStorage.setItem('theme', t); document.documentElement.setAttribute('data-theme', t); render(); },
   setPage(p) { this.currentPage = p; render(); },
   setToken(t) { this.token = t; localStorage.setItem('token', t); },
@@ -163,18 +167,30 @@ function requireLogin(actionName) {
 }
 
 // ===== CHANNEL STATUS PAGE =====
+const CH_PAGE_SIZE = 12; // 每页显示渠道数
+const providerInfo = { openai: { label: 'OpenAI', icon: '✦', color: 'text-emerald-500', bgActive: 'from-emerald-500 to-teal-600' }, anthropic: { label: 'Anthropic', icon: '✸', color: 'text-orange-500', bgActive: 'from-orange-500 to-red-500' } };
+
 async function renderChannelStatus() {
   const ct = document.getElementById('page-content');
-  ct.innerHTML = `<div class="flex items-center justify-center h-64"><div class="w-10 h-10 border-3 border-primary-500 border-t-transparent rounded-full animate-spin"></div></div>`;
-  const { data: channels } = await api.get('/channels?range=7');
-  if (!channels || channels.length === 0) {
+  // Only show spinner on first load
+  if (!store.chChannels) {
+    ct.innerHTML = `<div class="flex items-center justify-center h-64"><div class="w-10 h-10 border-3 border-primary-500 border-t-transparent rounded-full animate-spin"></div></div>`;
+    const { data: channels } = await api.get('/channels?range=7');
+    store.chChannels = channels || [];
+  }
+  const channels = store.chChannels;
+  if (channels.length === 0) {
     ct.innerHTML = `<div class="text-center py-20 fade-in"><div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/20 flex items-center justify-center mx-auto mb-4"><i class="fas fa-satellite-dish text-3xl text-primary-500"></i></div><p class="${cls.text()} text-lg font-semibold">尚未配置渠道</p><p class="${cls.textSub()} text-sm mt-2 mb-6">请先登录管理员账号，初始化数据并配置API密钥</p><button onclick="store.setPage('admin-settings')" class="${cls.btn()}"><i class="fas fa-cog mr-2"></i>前往管理设置</button></div>`;
     return;
   }
+  renderChannelStatusContent(channels);
+}
 
-  const providers = ['openai', 'anthropic'];
-  const tiers = ['lite', 'standard', 'ultra'];
-  const providerInfo = { openai: { label: 'OpenAI', icon: '✦', color: 'text-emerald-500' }, anthropic: { label: 'Anthropic', icon: '✸', color: 'text-orange-500' } };
+function renderChannelStatusContent(channels) {
+  const ct = document.getElementById('page-content');
+  const d = isDark();
+  const prov = store.chProvider || 'openai';
+  const page = store.chPage || 1;
 
   const allRates = channels.map(c => c.success_rate);
   const avgRate = Math.round(allRates.reduce((a, b) => a + b, 0) / allRates.length);
@@ -185,32 +201,110 @@ async function renderChannelStatus() {
   const testBtnClass = loggedIn ? cls.btn() : cls.btnDisabled();
   const testBtnAction = loggedIn ? 'onclick="runChannelTests()"' : 'onclick="requireLogin(\'检测\')"';
 
+  // Provider channels
+  const provChannels = channels.filter(c => c.provider === prov);
+  const openaiCount = channels.filter(c => c.provider === 'openai').length;
+  const anthropicCount = channels.filter(c => c.provider === 'anthropic').length;
+  const totalItems = provChannels.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / CH_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  store.chPage = currentPage;
+  store.chTotalPages = totalPages;
+
+  // Paginate
+  const startIdx = (currentPage - 1) * CH_PAGE_SIZE;
+  const pageChannels = provChannels.slice(startIdx, startIdx + CH_PAGE_SIZE);
+
+  // Provider tab styles
+  const tabCls = (p) => {
+    const active = p === prov;
+    const info = providerInfo[p];
+    if (active) return `px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r ${info.bgActive} shadow-md cursor-default transition-all`;
+    return `px-5 py-2.5 rounded-xl text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} cursor-pointer transition-all`;
+  };
+
   let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
     <div class="flex items-center gap-3"><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-satellite-dish mr-2 text-primary-500"></i>渠道状态</h2><span class="${sColor} px-3 py-1 rounded-full text-xs font-bold">${status}</span></div>
     <div class="flex items-center gap-2">
       <button ${testBtnAction} class="${testBtnClass} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测${!loggedIn ? ' 🔒' : ''}</button>
-      <button onclick="renderChannelStatus()" class="px-3 py-2 rounded-lg text-xs ${isDark() ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"><i class="fas fa-sync-alt"></i></button>
+      <button onclick="store.chChannels=null;renderChannelStatus()" class="px-3 py-2 rounded-lg text-xs ${d ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"><i class="fas fa-sync-alt"></i></button>
       <span class="${cls.textMuted()} text-xs"><i class="fas fa-clock mr-1"></i>每小时自动检测</span>
     </div></div>`;
 
-  for (const prov of providers) {
-    const info = providerInfo[prov];
-    const provChannels = channels.filter(c => c.provider === prov);
-    if (provChannels.length === 0) continue;
+  // Provider tabs
+  html += `<div class="flex items-center gap-3 mb-6">
+    <button onclick="switchChProvider('openai')" class="${tabCls('openai')}">
+      <span class="mr-1.5">${providerInfo.openai.icon}</span>OpenAI<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='openai'?'bg-white/20 text-white':'opacity-60'}">${openaiCount}</span>
+    </button>
+    <button onclick="switchChProvider('anthropic')" class="${tabCls('anthropic')}">
+      <span class="mr-1.5">${providerInfo.anthropic.icon}</span>Anthropic<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='anthropic'?'bg-white/20 text-white':'opacity-60'}">${anthropicCount}</span>
+    </button>
+  </div>`;
 
-    html += `<div class="mb-8 fade-in"><div class="flex items-center gap-2 mb-4"><span class="text-lg ${info.color}">${info.icon}</span><h3 class="text-sm font-semibold ${cls.text()}">${info.label}</h3><span class="${cls.textMuted()} text-xs">${provChannels.length}个渠道</span></div>`;
-
-    for (const tier of tiers) {
-      const tierChannels = provChannels.filter(c => c.tier === tier);
-      if (tierChannels.length === 0) continue;
-      html += `<div class="mb-4"><div class="flex items-center gap-2 mb-3">${tierBadge(tier)}</div><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">`;
-      tierChannels.forEach(ch => { html += renderChannelCard(ch); });
-      html += `</div></div>`;
-    }
+  // Cards grid (flat, no tier grouping — cards show tier in name already)
+  if (pageChannels.length === 0) {
+    html += `<div class="text-center py-16 fade-in"><i class="fas fa-inbox text-4xl ${cls.textMuted()} mb-3"></i><p class="${cls.textSub()} text-sm">该分类暂无渠道数据</p></div>`;
+  } else {
+    html += `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 fade-in">`;
+    pageChannels.forEach(ch => { html += renderChannelCard(ch); });
     html += `</div>`;
   }
+
+  // Pagination
+  if (totalPages > 1) {
+    html += renderChPagination(currentPage, totalPages, totalItems);
+  }
+
   ct.innerHTML = html;
 }
+
+window.switchChProvider = function(prov) {
+  store.chProvider = prov;
+  store.chPage = 1;
+  renderChannelStatusContent(store.chChannels || []);
+};
+
+function renderChPagination(currentPage, totalPages, total) {
+  const d = isDark();
+  const btnBase = `px-3 py-2 rounded-lg text-sm font-medium transition-all`;
+  const btnActive = `${btnBase} bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm`;
+  const btnNormal = `${btnBase} ${d ? 'text-slate-300 hover:bg-slate-700 border border-slate-600' : 'text-gray-700 hover:bg-gray-100 border border-gray-300'}`;
+  const btnDis = `${btnBase} ${d ? 'text-slate-600 border border-slate-700 cursor-not-allowed' : 'text-gray-300 border border-gray-200 cursor-not-allowed'}`;
+  let pages = [1];
+  let start = Math.max(2, currentPage - 2), end = Math.min(totalPages - 1, currentPage + 2);
+  if (start > 2) pages.push('...');
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (end < totalPages - 1) pages.push('...');
+  if (totalPages > 1) pages.push(totalPages);
+  let html = `<div class="flex items-center justify-center gap-2 mt-8 mb-4 flex-wrap">`;
+  html += `<button onclick="goChPage(1)" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
+  html += `<button onclick="goChPage(${currentPage-1})" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="上一页"><i class="fas fa-angle-left text-xs"></i></button>`;
+  for (const p of pages) {
+    if (p === '...') html += `<span class="px-2 py-2 text-sm ${cls.textMuted()}">…</span>`;
+    else html += `<button onclick="goChPage(${p})" class="${p===currentPage?btnActive:btnNormal}">${p}</button>`;
+  }
+  html += `<button onclick="goChPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="下一页"><i class="fas fa-angle-right text-xs"></i></button>`;
+  html += `<button onclick="goChPage(${totalPages})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
+  html += `<div class="flex items-center gap-2 ml-4"><span class="${cls.textSub()} text-sm">跳至</span><input id="ch-page-jump" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')jumpChPage()"><span class="${cls.textSub()} text-sm">页</span><button onclick="jumpChPage()" class="${btnNormal} !px-3 !py-1.5">GO</button></div>`;
+  html += `<span class="${cls.textMuted()} text-xs ml-3">共 ${total} 个渠道 / ${totalPages} 页</span>`;
+  html += `</div>`;
+  return html;
+}
+
+window.goChPage = function(p) {
+  if (p < 1) p = 1;
+  if (p > store.chTotalPages) p = store.chTotalPages;
+  store.chPage = p;
+  renderChannelStatusContent(store.chChannels || []);
+};
+window.jumpChPage = function() {
+  const input = document.getElementById('ch-page-jump');
+  if (!input) return;
+  let p = parseInt(input.value);
+  if (isNaN(p) || p < 1) p = 1;
+  if (p > store.chTotalPages) p = store.chTotalPages;
+  goChPage(p);
+};
 
 function getBarColor(responseTime, ping, success) {
   if (!success) return '#ef4444'; // red for failures
@@ -343,7 +437,7 @@ window.runChannelTests = async function() {
   if (!requireLogin('检测')) return;
   toast('正在检测所有渠道...', 'info', 5000);
   const resp = await api.post('/test-channels', {});
-  if (resp.code === 0) { toast(`检测完成！共 ${resp.data.length} 个渠道`, 'success'); renderChannelStatus(); }
+  if (resp.code === 0) { toast(`检测完成！共 ${resp.data.length} 个渠道`, 'success'); store.chChannels = null; renderChannelStatus(); }
   else toast(resp.message, 'error');
 };
 
@@ -840,5 +934,5 @@ function render() {
   }
 }
 
-setInterval(() => { if (store.currentPage === 'channel-status') renderChannelStatus(); }, 60 * 60 * 1000);
+setInterval(() => { if (store.currentPage === 'channel-status') { store.chChannels = null; renderChannelStatus(); } }, 60 * 60 * 1000);
 render();
