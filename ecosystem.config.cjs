@@ -2,11 +2,17 @@ module.exports = {
   apps: [
     {
       name: 'yuanqing-ai',
-      script: 'npx',
-      args: 'wrangler pages dev dist --d1=yuanqing-db --local --ip 0.0.0.0 --port 3000',
+      script: 'node',
+      args: 'dist/server.js',
+      cwd: '/home/user/webapp',
       env: {
         NODE_ENV: 'development',
-        PORT: 3000
+        PORT: 3000,
+        DB_HOST: '127.0.0.1',
+        DB_PORT: 3306,
+        DB_USER: 'yuanqing',
+        DB_PASS: 'yuanqing123',
+        DB_NAME: 'yuanqing'
       },
       watch: false,
       instances: 1,

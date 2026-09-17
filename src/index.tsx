@@ -1,23 +1,60 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { serveStatic } from '@hono/node-server/serve-static'
+import mysql from 'mysql2/promise'
 
-type Bindings = { DB: D1Database }
+// ===== DB Pool =====
+let pool: mysql.Pool
+
+function getPool(): mysql.Pool {
+  if (!pool) {
+    pool = mysql.createPool({
+      host: process.env.DB_HOST || '127.0.0.1',
+      port: parseInt(process.env.DB_PORT || '3306'),
+      user: process.env.DB_USER || 'yuanqing',
+      password: process.env.DB_PASS || 'yuanqing123',
+      database: process.env.DB_NAME || 'yuanqing',
+      waitForConnections: true,
+      connectionLimit: 10,
+      charset: 'utf8mb4',
+    })
+  }
+  return pool
+}
+
+// Helper: query shorthand
+async function query(sql: string, params: any[] = []): Promise<any[]> {
+  const [rows] = await getPool().execute(sql, params)
+  return rows as any[]
+}
+async function queryOne(sql: string, params: any[] = []): Promise<any | null> {
+  const rows = await query(sql, params)
+  return rows[0] || null
+}
+async function run(sql: string, params: any[] = []): Promise<any> {
+  const [result] = await getPool().execute(sql, params)
+  return result
+}
+
 type Variables = { user?: { id: number; username: string } }
 
-const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
+const app = new Hono<{ Variables: Variables }>()
 app.use('/api/*', cors())
+
+// Serve static files
+app.use('/static/*', serveStatic({ root: './public' }))
 
 // ===== Auth helpers =====
 async function createToken(payload: object): Promise<string> {
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
-  const body = btoa(JSON.stringify({ ...payload, exp: Date.now() + 86400000 }))
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64')
+  const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + 86400000 })).toString('base64')
   return `${header}.${body}.sig`
 }
 function verifyToken(token: string): any {
   try {
     const parts = token.split('.')
     if (parts.length !== 3) return null
-    const payload = JSON.parse(atob(parts[1]))
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
     if (payload.exp && payload.exp < Date.now()) return null
     return payload
   } catch { return null }
@@ -32,21 +69,20 @@ async function authMiddleware(c: any, next: any) {
 }
 
 // ===== Public =====
-app.get('/api/health', (c) => c.json({ code: 0, message: 'ok' }))
+app.get('/api/health', async (c) => {
+  try { await query('SELECT 1'); return c.json({ code: 0, message: 'ok' }) }
+  catch (e: any) { return c.json({ code: -1, message: 'DB error: ' + e.message }, 500) }
+})
 
 app.post('/api/login', async (c) => {
-  const db = c.env.DB
   const { username, password } = await c.req.json()
-  // Check against DB first for custom password
-  const user = await db.prepare('SELECT * FROM admin_users WHERE username = ?').bind(username).first()
+  const user = await queryOne('SELECT * FROM admin_users WHERE username = ?', [username])
   if (user) {
-    // password_hash stores plain text for simplicity in Workers env (no bcrypt)
-    // Support both legacy default and custom passwords
     const storedPw = user.password_hash as string
     const isLegacy = storedPw.startsWith('$2a$') && password === 'admin123' && username === 'admin'
     const isMatch = storedPw === password
     if (isLegacy || isMatch) {
-      const token = await createToken({ id: user.id, username: user.username as string })
+      const token = await createToken({ id: user.id, username: user.username })
       return c.json({ code: 0, data: { token, user: { id: user.id, username: user.username } } })
     }
   }
@@ -55,9 +91,8 @@ app.post('/api/login', async (c) => {
 
 // ===== Public: read configs (key masked) =====
 app.get('/api/configs', async (c) => {
-  const db = c.env.DB
-  const configs = await db.prepare('SELECT id, provider, tier, config_json, updated_at FROM api_configs ORDER BY provider, tier').all()
-  const masked = (configs.results || []).map((r: any) => {
+  const configs = await query('SELECT id, provider, tier, config_json, updated_at FROM api_configs ORDER BY provider, tier')
+  const masked = configs.map((r: any) => {
     try {
       const j = JSON.parse(r.config_json)
       return { ...r, url: j.url, key_masked: j.key ? j.key.substring(0, 8) + '****' : '', has_key: !!j.key }
@@ -68,15 +103,13 @@ app.get('/api/configs', async (c) => {
 
 // ===== Public: channels with tier grouping =====
 app.get('/api/channels', async (c) => {
-  const db = c.env.DB
   const range = parseInt(c.req.query('range') || '7')
-  const since = new Date(Date.now() - range * 86400000).toISOString()
+  const since = new Date(Date.now() - range * 86400000).toISOString().slice(0, 19).replace('T', ' ')
 
-  const channels = await db.prepare('SELECT * FROM channels WHERE is_active = 1 ORDER BY provider, tier, sort_order').all()
+  const channels = await query('SELECT * FROM channels WHERE is_active = 1 ORDER BY provider, tier, sort_order')
   const results = []
-  for (const ch of channels.results || []) {
-    const tests = await db.prepare('SELECT * FROM channel_tests WHERE channel_id = ? AND tested_at > ? ORDER BY tested_at DESC LIMIT 60').bind(ch.id, since).all()
-    const testResults = tests.results || []
+  for (const ch of channels) {
+    const testResults = await query('SELECT * FROM channel_tests WHERE channel_id = ? AND tested_at > ? ORDER BY tested_at DESC LIMIT 60', [ch.id, since])
     const successCount = testResults.filter((t: any) => t.success === 1).length
     const totalTests = testResults.length
     const successRate = totalTests > 0 ? Math.round((successCount / totalTests) * 100) : 0
@@ -93,7 +126,6 @@ app.get('/api/channels', async (c) => {
 
 // ===== Public: IQ tests =====
 app.get('/api/iq-tests', async (c) => {
-  const db = c.env.DB
   const tier = c.req.query('tier') || ''
   const limit = parseInt(c.req.query('limit') || '50')
   let sql = 'SELECT id, provider, tier, model, test_type, result, score, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at FROM iq_tests WHERE 1=1'
@@ -101,53 +133,48 @@ app.get('/api/iq-tests', async (c) => {
   if (tier) { sql += ' AND tier = ?'; params.push(tier) }
   sql += ' ORDER BY tested_at DESC LIMIT ?'
   params.push(limit)
-  const results = await db.prepare(sql).bind(...params).all()
-  return c.json({ code: 0, data: results.results || [] })
+  const results = await query(sql, params)
+  return c.json({ code: 0, data: results })
 })
 
 app.get('/api/iq-tests/stats', async (c) => {
-  const db = c.env.DB
-  const stats = await db.prepare(`SELECT tier, model, result, COUNT(*) as count FROM iq_tests GROUP BY tier, model, result ORDER BY tier, model`).all()
-  return c.json({ code: 0, data: stats.results || [] })
+  const stats = await query('SELECT tier, model, result, COUNT(*) as count FROM iq_tests GROUP BY tier, model, result ORDER BY tier, model')
+  return c.json({ code: 0, data: stats })
 })
 
 // ===== Admin =====
 app.get('/api/admin/configs', authMiddleware, async (c) => {
-  const db = c.env.DB
-  const configs = await db.prepare('SELECT * FROM api_configs ORDER BY provider, tier').all()
-  return c.json({ code: 0, data: configs.results || [] })
+  const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
+  return c.json({ code: 0, data: configs })
 })
 
 app.post('/api/admin/configs', authMiddleware, async (c) => {
-  const db = c.env.DB
   const { provider, tier, key, url } = await c.req.json()
   if (!provider || !tier || !key || !url) return c.json({ code: -1, message: '参数不完整' }, 400)
   const config_json = JSON.stringify({ _type: 'newapi_channel_conn', key, url })
-  await db.prepare(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(provider, tier) DO UPDATE SET config_json = excluded.config_json, updated_at = datetime('now')`)
-    .bind(provider, tier, config_json).run()
+  await run(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), updated_at = NOW()`, [provider, tier, config_json])
   return c.json({ code: 0, message: '保存成功' })
 })
 
 app.delete('/api/admin/configs/:id', authMiddleware, async (c) => {
   const id = c.req.param('id')
-  await c.env.DB.prepare('DELETE FROM api_configs WHERE id = ?').bind(id).run()
+  await run('DELETE FROM api_configs WHERE id = ?', [id])
   return c.json({ code: 0, message: '删除成功' })
 })
 
 // ===== Admin: change password =====
 app.post('/api/admin/change-password', authMiddleware, async (c) => {
-  const db = c.env.DB
   const { currentPassword, newPassword } = await c.req.json()
   if (!currentPassword || !newPassword) return c.json({ code: -1, message: '请填写完整信息' }, 400)
   if (newPassword.length < 6) return c.json({ code: -1, message: '新密码至少6位' }, 400)
   const user: any = c.get('user')
-  const dbUser = await db.prepare('SELECT * FROM admin_users WHERE id = ?').bind(user.id).first()
+  const dbUser = await queryOne('SELECT * FROM admin_users WHERE id = ?', [user.id])
   if (!dbUser) return c.json({ code: -1, message: '用户不存在' }, 400)
   const storedPw = dbUser.password_hash as string
   const isLegacy = storedPw.startsWith('$2a$') && currentPassword === 'admin123'
   const isMatch = storedPw === currentPassword
   if (!isLegacy && !isMatch) return c.json({ code: -1, message: '当前密码错误' }, 400)
-  await db.prepare('UPDATE admin_users SET password_hash = ? WHERE id = ?').bind(newPassword, user.id).run()
+  await run('UPDATE admin_users SET password_hash = ? WHERE id = ?', [newPassword, user.id])
   return c.json({ code: 0, message: '密码修改成功！下次登录请使用新密码。' })
 })
 
@@ -173,29 +200,25 @@ async function testUpstream(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { success: false, responseTime: 0, ping: pingTime, error: e.message } }
 }
 
-// Test channels by tier
 app.post('/api/test-channels', async (c) => {
-  const db = c.env.DB
   const { tier } = await c.req.json().catch(() => ({ tier: '' }))
-  
   let channelQuery = 'SELECT * FROM channels WHERE is_active = 1'
   const channelParams: any[] = []
   if (tier) { channelQuery += ' AND tier = ?'; channelParams.push(tier) }
   channelQuery += ' ORDER BY provider, sort_order'
-  
-  const channels = await db.prepare(channelQuery).bind(...channelParams).all()
+  const channels = await query(channelQuery, channelParams)
   const results = []
 
-  for (const ch of channels.results || []) {
-    const config = await db.prepare('SELECT * FROM api_configs WHERE provider = ? AND tier = ?').bind(ch.provider, ch.tier).first()
+  for (const ch of channels) {
+    const config = await queryOne('SELECT * FROM api_configs WHERE provider = ? AND tier = ?', [ch.provider, ch.tier])
     if (!config) { results.push({ channel_id: ch.id, name: ch.name, error: '未配置密钥' }); continue }
     try {
-      const cfg = JSON.parse(config.config_json as string)
-      const result = await testUpstream(cfg.url, cfg.key, ch.model_id as string)
-      await db.prepare('INSERT INTO channel_tests (channel_id, response_time_ms, ping_ms, success, tested_at) VALUES (?, ?, ?, ?, datetime(\'now\'))').bind(ch.id, result.responseTime, result.ping, result.success ? 1 : 0).run()
+      const cfg = JSON.parse(config.config_json)
+      const result = await testUpstream(cfg.url, cfg.key, ch.model_id)
+      await run('INSERT INTO channel_tests (channel_id, response_time_ms, ping_ms, success, tested_at) VALUES (?, ?, ?, ?, NOW())', [ch.id, result.responseTime, result.ping, result.success ? 1 : 0])
       results.push({ channel_id: ch.id, name: ch.name, ...result })
     } catch (e: any) {
-      await db.prepare('INSERT INTO channel_tests (channel_id, response_time_ms, ping_ms, success, tested_at) VALUES (?, ?, 0, 0, datetime(\'now\'))').bind(ch.id, 0).run()
+      await run('INSERT INTO channel_tests (channel_id, response_time_ms, ping_ms, success, tested_at) VALUES (?, 0, 0, 0, NOW())', [ch.id])
       results.push({ channel_id: ch.id, name: ch.name, error: e.message })
     }
   }
@@ -235,7 +258,6 @@ async function runCandyTest(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { result: 'degraded', score: 0, rawResponse: `Error: ${e.message}`, reasoningTokens: 0, inputTokens: 0, outputTokens: 0, responseTime: Date.now() - startTime } }
 }
 
-// Generate pelican riding bicycle SVG animation via chat completions (community benchmark prompt)
 const SVG_PROMPT_EN = `Create a single, complete, self-contained animated SVG, no external files. Side view, a cute pelican riding a bicycle. Pelican webbed feet on pedals, wings gripping handlebars, large orange throat pouch. Bicycle with frame, seat, pedals, rotating spoked wheels. CSS keyframe animation, wheels spin, legs pedal. Simple background, sky and road. Flat cartoon style, clean path, no JS. Output ONLY the SVG code, no explanations.`
 
 const SVG_MODELS = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5']
@@ -247,12 +269,7 @@ async function generatePelicanSVG(baseUrl: string, apiKey: string, model?: strin
       const resp = await fetch(baseUrl + '/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: m,
-          messages: [{ role: 'user', content: SVG_PROMPT_EN }],
-          max_tokens: 16000,
-          stream: false
-        }),
+        body: JSON.stringify({ model: m, messages: [{ role: 'user', content: SVG_PROMPT_EN }], max_tokens: 16000, stream: false }),
         signal: AbortSignal.timeout(180000)
       })
       if (!resp.ok) {
@@ -263,7 +280,6 @@ async function generatePelicanSVG(baseUrl: string, apiKey: string, model?: strin
       }
       const data: any = await resp.json()
       const content = data.choices?.[0]?.message?.content || ''
-      // Extract SVG from response (may be wrapped in markdown code block)
       const svgMatch = content.match(/<svg[\s\S]*?<\/svg>/i)
       if (svgMatch) return svgMatch[0]
       continue
@@ -273,28 +289,23 @@ async function generatePelicanSVG(baseUrl: string, apiKey: string, model?: strin
 }
 
 app.post('/api/run-iq-test', async (c) => {
-  const db = c.env.DB
   const { model, tier, provider } = await c.req.json()
-  const config = await db.prepare('SELECT * FROM api_configs WHERE provider = ? AND tier = ?').bind(provider || 'openai', tier || 'lite').first()
+  const config = await queryOne('SELECT * FROM api_configs WHERE provider = ? AND tier = ?', [provider || 'openai', tier || 'lite'])
   if (!config) return c.json({ code: -1, message: `未配置 ${provider}/${tier} 分组的API密钥，请先在管理设置中配置` }, 400)
-  const cfg = JSON.parse(config.config_json as string)
-  
-  // Run candy test + pelican SVG generation in parallel
+  const cfg = JSON.parse(config.config_json)
+
   const [result, svgCode] = await Promise.all([
     runCandyTest(cfg.url, cfg.key, model),
     generatePelicanSVG(cfg.url, cfg.key, model).catch(() => null)
   ])
-  
-  await db.prepare(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, '', ?, datetime('now'))`)
-    .bind(provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, svgCode || '').run()
+
+  await run(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, '', ?, NOW())`,
+    [provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, svgCode || ''])
   return c.json({ code: 0, data: { ...result, svgCode } })
 })
 
-// ===== Seed with REAL keys =====
+// ===== Seed =====
 app.post('/api/admin/seed', authMiddleware, async (c) => {
-  const db = c.env.DB
-
-  // Insert the 3 real API configs for OpenAI
   const openaiConfigs = [
     { tier: 'lite', key: 'sk-Y8QC5oQFlBdfgATUsFgmwf60IO51ao2RS4ZP57IJ9yLBjTmp' },
     { tier: 'standard', key: 'sk-sxtlBE2piAtKCj7omSKm5MQBuHTS8ZjHODuAXOVhhFQQeSia' },
@@ -302,17 +313,13 @@ app.post('/api/admin/seed', authMiddleware, async (c) => {
   ]
   for (const cfg of openaiConfigs) {
     const json = JSON.stringify({ _type: 'newapi_channel_conn', key: cfg.key, url: 'https://api.icloud99.cn' })
-    await db.prepare(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES ('openai', ?, ?, datetime('now')) ON CONFLICT(provider, tier) DO UPDATE SET config_json = excluded.config_json, updated_at = datetime('now')`)
-      .bind(cfg.tier, json).run()
+    await run(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES ('openai', ?, ?, NOW()) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), updated_at = NOW()`, [cfg.tier, json])
   }
 
-  // Clear old channels
-  await db.prepare('DELETE FROM channels').run()
-  await db.prepare('DELETE FROM channel_tests').run()
+  await run('DELETE FROM channel_tests')
+  await run('DELETE FROM channels')
 
-  // Create channels grouped by provider+tier+model
   const channels = [
-    // OpenAI - each tier has 4 models
     { name: 'Lite · GPT-5.6-SOL', provider: 'openai', tier: 'lite', model_id: 'gpt-5.6-sol', icon: '⚡', sort: 1 },
     { name: 'Lite · GPT-6-ASTRA', provider: 'openai', tier: 'lite', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
     { name: 'Lite · GPT-5.6-TERRA', provider: 'openai', tier: 'lite', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
@@ -325,7 +332,6 @@ app.post('/api/admin/seed', authMiddleware, async (c) => {
     { name: 'Ultra · GPT-6-ASTRA', provider: 'openai', tier: 'ultra', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
     { name: 'Ultra · GPT-5.6-TERRA', provider: 'openai', tier: 'ultra', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
     { name: 'Ultra · GPT-IMAGE-2', provider: 'openai', tier: 'ultra', model_id: 'gpt-image-2', icon: '🎨', sort: 4 },
-    // Anthropic - each tier has 4 models
     { name: 'Lite · Claude-Opus-4-6', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-6', icon: '✨', sort: 1 },
     { name: 'Lite · Claude-Fable-5', provider: 'anthropic', tier: 'lite', model_id: 'claude-fable-5', icon: '📖', sort: 2 },
     { name: 'Lite · Claude-Opus-4-7', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-7', icon: '🔮', sort: 3 },
@@ -341,7 +347,7 @@ app.post('/api/admin/seed', authMiddleware, async (c) => {
   ]
 
   for (const ch of channels) {
-    await db.prepare('INSERT INTO channels (name, provider, tier, model_id, icon, rate_multiplier, sort_order) VALUES (?, ?, ?, ?, ?, 1.0, ?)').bind(ch.name, ch.provider, ch.tier, ch.model_id, ch.icon, ch.sort).run()
+    await run('INSERT INTO channels (name, provider, tier, model_id, icon, rate_multiplier, sort_order) VALUES (?, ?, ?, ?, ?, 1.0, ?)', [ch.name, ch.provider, ch.tier, ch.model_id, ch.icon, ch.sort])
   }
 
   return c.json({ code: 0, message: '初始化完成！已配置 OpenAI 3组密钥 + 24个检测渠道。请配置 Anthropic 密钥后使用完整功能。' })
@@ -349,31 +355,23 @@ app.post('/api/admin/seed', authMiddleware, async (c) => {
 
 // ===== Channel Detail API =====
 app.get('/api/channels/:id/detail', async (c) => {
-  const db = c.env.DB
   const channelId = parseInt(c.req.param('id'))
-  const channel = await db.prepare('SELECT * FROM channels WHERE id = ?').bind(channelId).first()
+  const channel = await queryOne('SELECT * FROM channels WHERE id = ?', [channelId])
   if (!channel) return c.json({ code: -1, message: '渠道不存在' }, 404)
 
-  // Get latest test
-  const latest = await db.prepare('SELECT * FROM channel_tests WHERE channel_id = ? ORDER BY tested_at DESC LIMIT 1').bind(channelId).first()
-
-  // 7-day stats
-  const since7 = new Date(Date.now() - 7 * 86400000).toISOString()
-  const stats7 = await db.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count, AVG(CASE WHEN success=1 THEN response_time_ms END) as avg_latency FROM channel_tests WHERE channel_id = ? AND tested_at > ?').bind(channelId, since7).first() as any
-
-  // 15-day stats
-  const since15 = new Date(Date.now() - 15 * 86400000).toISOString()
-  const stats15 = await db.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count FROM channel_tests WHERE channel_id = ? AND tested_at > ?').bind(channelId, since15).first() as any
-
-  // 30-day stats
-  const since30 = new Date(Date.now() - 30 * 86400000).toISOString()
-  const stats30 = await db.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count FROM channel_tests WHERE channel_id = ? AND tested_at > ?').bind(channelId, since30).first() as any
+  const latest = await queryOne('SELECT * FROM channel_tests WHERE channel_id = ? ORDER BY tested_at DESC LIMIT 1', [channelId])
+  const since7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 19).replace('T', ' ')
+  const stats7 = await queryOne('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count, AVG(CASE WHEN success=1 THEN response_time_ms END) as avg_latency FROM channel_tests WHERE channel_id = ? AND tested_at > ?', [channelId, since7])
+  const since15 = new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 19).replace('T', ' ')
+  const stats15 = await queryOne('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count FROM channel_tests WHERE channel_id = ? AND tested_at > ?', [channelId, since15])
+  const since30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 19).replace('T', ' ')
+  const stats30 = await queryOne('SELECT COUNT(*) as total, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as success_count FROM channel_tests WHERE channel_id = ? AND tested_at > ?', [channelId, since30])
 
   return c.json({ code: 0, data: {
     channel,
-    latest_status: latest && (latest as any).success === 1 ? '正常' : '异常',
-    latest_latency: latest ? (latest as any).response_time_ms : 0,
-    latest_ping: latest ? (latest as any).ping_ms : 0,
+    latest_status: latest && latest.success === 1 ? '正常' : '异常',
+    latest_latency: latest ? latest.response_time_ms : 0,
+    latest_ping: latest ? latest.ping_ms : 0,
     availability_7d: stats7.total > 0 ? ((stats7.success_count / stats7.total) * 100).toFixed(2) + '%' : '-',
     availability_15d: stats15.total > 0 ? ((stats15.success_count / stats15.total) * 100).toFixed(2) + '%' : '-',
     availability_30d: stats30.total > 0 ? ((stats30.success_count / stats30.total) * 100).toFixed(2) + '%' : '-',
@@ -383,31 +381,22 @@ app.get('/api/channels/:id/detail', async (c) => {
 
 // ===== IQ Tests with pagination =====
 app.get('/api/iq-tests-paged', async (c) => {
-  const db = c.env.DB
   const page = parseInt(c.req.query('page') || '1')
   const pageSize = parseInt(c.req.query('pageSize') || '12')
   const tier = c.req.query('tier') || ''
-  
   let countSql = 'SELECT COUNT(*) as total FROM iq_tests WHERE 1=1'
   let sql = 'SELECT id, provider, tier, model, test_type, result, score, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at FROM iq_tests WHERE 1=1'
   const params: any[] = []
   const countParams: any[] = []
-  
-  if (tier) {
-    sql += ' AND tier = ?'; params.push(tier)
-    countSql += ' AND tier = ?'; countParams.push(tier)
-  }
-  
-  const countResult = await db.prepare(countSql).bind(...countParams).first() as any
+  if (tier) { sql += ' AND tier = ?'; params.push(tier); countSql += ' AND tier = ?'; countParams.push(tier) }
+  const countResult = await queryOne(countSql, countParams)
   const total = countResult?.total || 0
-  const totalPages = Math.ceil(total / pageSize)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const offset = (page - 1) * pageSize
-  
   sql += ' ORDER BY tested_at DESC LIMIT ? OFFSET ?'
   params.push(pageSize, offset)
-  
-  const results = await db.prepare(sql).bind(...params).all()
-  return c.json({ code: 0, data: { list: results.results || [], total, page, pageSize, totalPages } })
+  const results = await query(sql, params)
+  return c.json({ code: 0, data: { list: results, total, page, pageSize, totalPages } })
 })
 
 // ===== Frontend =====

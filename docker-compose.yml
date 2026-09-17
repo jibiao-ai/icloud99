@@ -1,12 +1,38 @@
 services:
+  db:
+    image: mariadb:11
+    container_name: yuanqing-db
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpass123
+      MARIADB_DATABASE: yuanqing
+      MARIADB_USER: yuanqing
+      MARIADB_PASSWORD: yuanqing123
+    volumes:
+      - yuanqing-mariadb-data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     container_name: yuanqing-ai
-    volumes:
-      - yuanqing-d1-data:/app/.wrangler/state/v3/d1
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=yuanqing
+      - DB_PASS=yuanqing123
+      - DB_NAME=yuanqing
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   nginx:
@@ -23,5 +49,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  yuanqing-d1-data:
+  yuanqing-mariadb-data:
     driver: local

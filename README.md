@@ -6,100 +6,44 @@
 
 - **名称**: 元擎智算可视化 (YuanQing AI Visualization)
 - **目标**: 提供渠道状态监控、GPT 智商雷达、鹈鹕骑行智力检测等功能
-- **技术栈**: Hono + TypeScript + Tailwind CSS (CDN) + Cloudflare D1 (SQLite)
-- **运行时**: Cloudflare Workers / Wrangler (本地开发)
+- **技术栈**: Hono + Node.js + TypeScript + Tailwind CSS (CDN) + **MariaDB**
+- **运行时**: Node.js + @hono/node-server + mysql2
 
 ## 功能模块
 
 ### 渠道状态监控（无需登录）
-- 支持 OpenAI / Anthropic 双 Provider
+- 支持 OpenAI / Anthropic 双 Provider Tab 切换
 - 模型: `gpt-5.6-sol`、`gpt-6-astra`、`gpt-5.6-terra`、`gpt-image-2`、`claude-opus-4-6`、`claude-fable-5`、`claude-opus-4-7`、`claude-opus-4-8`
-- 每渠道 60 次检测柱状图（🟢 延迟≤25s & PING≤1.5s / 🟠 中间 / 🔴 延迟≥50s 或 PING≥3s）
-- 点击卡片弹窗查看：模型、最新状态、最新延迟、7/15/30 天可用率、7 天平均延迟
-- 速度状态：极速 / 较慢 / 拥堵
+- 每 Provider 12 个渠道（4 模型 × 3 分组），分页显示
+- 每渠道 60 次检测柱状图（🟢 / 🟠 / 🔴）
+- 点击卡片弹窗：7/15/30 天可用率
 
-### 智力检测 · 鹈鹕骑行（查看无需登录，操作需登录）
-- Codex Candy Eval 糖果问题测试 + SVG 动画生成
-- GPT Chat Completions 生成鹈鹕骑行 SVG 动画（CSS @keyframes）
-- 按 Lite / Standard / Ultra 分组检测
-- 2 排 × 6 列分页网格，支持首页/尾页/页码跳转
-- SVG CSS 作用域隔离（多 SVG 并行渲染无冲突）
-- 放大动画预览模态框
-
-### GPT 智商雷达（无需登录）
-- 嵌入 IQ Radar 页面实时查看
-- 支持亮色 / 暗色主题自动适配
-
-### 管理员设置（需登录）
-- 默认账号: `admin` / `admin123`
-- 配置 OpenAI / Anthropic 各分组（Lite / Standard / Ultra）API 密钥
-- 种子数据初始化（24 个检测渠道）
-- 密码修改
+### 智力检测 · 鹈鹕骑行（操作需登录）
+- Codex Candy Eval + SVG 动画生成
+- 2 排 × 6 列分页网格
+- SVG CSS 作用域隔离
 
 ### 权限控制
-- 未登录用户：「立即检测」「Lite」「Standard」「Ultra」按钮禁用显示锁图标
-- 点击提示登录并自动跳转到登录页面
-
-## API 入口
-
-| 路径 | 方法 | 描述 | 登录 |
-|------|------|------|------|
-| `/api/health` | GET | 健康检查 | 否 |
-| `/api/channels?range=7` | GET | 渠道状态列表 | 否 |
-| `/api/channels/:id/detail` | GET | 渠道详情（7/15/30 天统计） | 否 |
-| `/api/iq-tests-paged?page=1&pageSize=12` | GET | 智力检测分页查询 | 否 |
-| `/api/iq-tests/stats` | GET | 智力检测统计 | 否 |
-| `/api/test-channels` | POST | 批量检测所有渠道 | 否 |
-| `/api/run-iq-test` | POST | 运行单次智力检测 | 否 |
-| `/api/login` | POST | 管理员登录 | 否 |
-| `/api/admin/configs` | GET/POST | 管理 API 配置 | 是 |
-| `/api/admin/configs/:id` | DELETE | 删除 API 配置 | 是 |
-| `/api/admin/seed` | POST | 初始化种子数据 | 是 |
-| `/api/admin/change-password` | POST | 修改密码 | 是 |
-
-## 数据架构
-
-**数据库**: Cloudflare D1 (SQLite)，本地开发使用 `wrangler --local` 模式自动创建 `.wrangler/state/v3/d1/` 下的 SQLite 文件。
-
-| 表名 | 描述 |
-|------|------|
-| `admin_users` | 管理员用户 |
-| `api_configs` | API 密钥配置（provider + tier 唯一约束） |
-| `channels` | 渠道信息（名称、模型、图标、倍率） |
-| `channel_tests` | 渠道检测结果（延迟、PING、成功状态） |
-| `iq_tests` | 智力检测结果（含 svg_code 列存储 SVG 动画） |
-
-**迁移文件**:
-```
-migrations/
-├── 0001_initial.sql        # 基础表结构 + 默认管理员
-├── 0002_add_tier.sql       # channels 添加 tier 字段
-├── 0003_add_image_url.sql  # iq_tests 添加 image_url 字段
-└── 0004_add_svg_code.sql   # iq_tests 添加 svg_code 字段
-```
+- 未登录用户：检测按钮禁用
 
 ## 项目结构
 
 ```
 yuanqing-ai-viz/
 ├── src/
-│   └── index.tsx            # Hono 后端（路由、API、SVG 生成）
-├── public/
-│   └── static/
-│       ├── app.js           # 前端 SPA（vanilla JS）
-│       └── logo.png         # 品牌 Logo
-├── migrations/              # D1 数据库迁移文件
-├── dist/                    # 构建输出（vite build）
-├── package.json             # 依赖和脚本
-├── vite.config.ts           # Vite 构建配置
-├── wrangler.jsonc           # Cloudflare Workers 配置
-├── ecosystem.config.cjs     # PM2 进程管理配置
-├── Dockerfile               # Docker 容器构建
-├── docker-compose.yml       # Docker Compose 编排（Nginx + App）
-├── nginx.conf               # Nginx 反向代理配置
-└── certs/                   # SSL 证书目录（HTTPS 用）
-    ├── fullchain.pem
-    └── privkey.pem
+│   ├── index.tsx            # Hono 路由 + mysql2 数据库层
+│   └── server.ts            # Node.js 启动入口
+├── public/static/
+│   ├── app.js               # 前端 SPA
+│   └── logo.png             # Logo
+├── dist/                    # TypeScript 编译输出
+├── init.sql                 # MariaDB 建表脚本
+├── package.json
+├── tsconfig.json
+├── Dockerfile
+├── docker-compose.yml       # MariaDB + App + Nginx
+├── nginx.conf
+└── docker-entrypoint.sh     # 等待DB就绪+自动建表+启动
 ```
 
 ---
@@ -108,20 +52,18 @@ yuanqing-ai-viz/
 
 ### 方式一：Docker 部署（推荐）
 
-采用 **Nginx + App** 双容器架构，Nginx 对外暴露 **80（HTTP）** 和 **443（HTTPS）** 端口，反向代理到内部应用。
+**架构**: Nginx (80/443) → App (Node.js:3000) → MariaDB (3306)
 
 ```
 ┌─────────────────────────────────────────────┐
 │  Docker Compose                              │
 │                                              │
-│  ┌──────────┐    proxy     ┌──────────────┐ │
-│  │  Nginx   │ ──────────→  │  App (Hono)  │ │
-│  │ :80/:443 │   port 3000  │  + Wrangler  │ │
-│  └──────────┘              │  + D1 SQLite │ │
-│       ↑                    └──────────────┘ │
-│   外部访问                       ↓           │
-│                          yuanqing-d1-data   │
-│                          (Docker Volume)     │
+│  ┌──────────┐  proxy  ┌──────┐  sql  ┌────┐ │
+│  │  Nginx   │ ──────→ │ App  │ ────→ │ DB │ │
+│  │ :80/:443 │         │:3000 │       │:3306│ │
+│  └──────────┘         └──────┘       └────┘ │
+│       ↑                                 ↓    │
+│   外部访问              yuanqing-mariadb-data │
 └─────────────────────────────────────────────┘
 ```
 
@@ -129,265 +71,117 @@ yuanqing-ai-viz/
 
 - Docker >= 20.10
 - Docker Compose >= 2.0
-- 服务器开放 **80** 和 **443** 端口
 
-#### 1. 克隆仓库
+#### 1. 克隆 & 启动
 
 ```bash
 git clone https://github.com/jibiao-ai/icloud99.git
 cd icloud99
-```
-
-#### 2. 一键启动（HTTP）
-
-```bash
 docker compose up -d
 ```
 
-服务启动后访问：`http://<你的服务器IP>`（端口 80）
+服务启动后访问：`http://<服务器IP>`（端口 80）
+
+MariaDB 首次启动自动执行 `init.sql` 建表 + 插入默认管理员。
+
+#### 2. 初始化渠道数据
+
+1. 浏览器访问 `http://<服务器IP>`
+2. 左侧「管理设置」→ 登录 `admin` / `admin123`
+3. 点击「初始化数据」
 
 #### 3. 启用 HTTPS（可选）
 
-如果你有域名和 SSL 证书（可通过 Let's Encrypt 免费获取）：
-
 ```bash
-# 创建证书目录并放入证书文件
 mkdir -p certs
-cp /path/to/fullchain.pem certs/
-cp /path/to/privkey.pem certs/
-```
-
-编辑 `nginx.conf`，取消 HTTPS 部分的注释，并修改 `server_name`：
-
-```nginx
-# 取消注释 HTTP → HTTPS 重定向
-return 301 https://$host$request_uri;
-
-# 取消注释整个 HTTPS server 块，修改域名
-server {
-    listen 443 ssl;
-    server_name your-domain.com;   # ← 改为你的域名
-    ...
-}
-```
-
-重启服务：
-
-```bash
+# 放入 fullchain.pem 和 privkey.pem
+# 编辑 nginx.conf 取消 HTTPS server 块的注释
 docker compose restart nginx
 ```
 
-访问：`https://your-domain.com`
-
-**使用 Let's Encrypt 自动获取免费证书**：
+#### 4. 常用命令
 
 ```bash
-# 安装 certbot（以 Ubuntu 为例）
-sudo apt install certbot
+docker compose up -d              # 启动
+docker compose logs -f app        # 应用日志
+docker compose logs -f db         # 数据库日志
+docker compose down               # 停止
+docker compose up -d --build      # 代码更新后重新构建
 
-# 先停止 nginx 释放 80 端口
-docker compose stop nginx
-
-# 获取证书
-sudo certbot certonly --standalone -d your-domain.com
-
-# 复制证书到项目目录
-sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem certs/
-sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem certs/
-sudo chmod 644 certs/*.pem
-
-# 编辑 nginx.conf 启用 HTTPS（参考上面的步骤）
-# 重新启动
-docker compose up -d
-```
-
-#### 4. 初始化数据
-
-容器首次启动时自动执行数据库迁移。初始化种子数据：
-
-1. 浏览器访问 `http://<服务器IP>` 或 `https://your-domain.com`
-2. 点击左侧菜单「管理设置」
-3. 使用默认账号登录：`admin` / `admin123`（**请登录后立即修改密码**）
-4. 点击「初始化数据」按钮
-
-#### 5. 配置 API 密钥
-
-在管理设置中为各分组配置 New API 密钥：
-
-- **API URL**: `https://api.icloud99.cn`
-- **API Key**: 你的 `sk-xxxxxxxx` 令牌
-
-#### 6. 常用命令
-
-```bash
-# 启动（后台运行）
-docker compose up -d
-
-# 查看日志
-docker compose logs -f
-docker compose logs -f app     # 仅看应用日志
-docker compose logs -f nginx   # 仅看 Nginx 日志
-
-# 停止
-docker compose down
-
-# 代码更新后重新构建
-git pull
-docker compose up -d --build
-
-# 进入容器调试
-docker compose exec app sh
-
-# 重启 Nginx（修改 nginx.conf 后）
-docker compose restart nginx
-```
-
-#### 7. 数据持久化
-
-D1 数据库文件持久存储在 Docker Volume `yuanqing-d1-data` 中，容器重建不丢失。
-
-```bash
-# 查看数据卷
-docker volume ls | grep yuanqing
+# 进入 MariaDB
+docker compose exec db mariadb -uyuanqing -pyuanqing123 yuanqing
 
 # 备份数据库
-docker compose exec app sh -c "cp -r /app/.wrangler/state/v3/d1 /tmp/d1-backup"
-docker cp $(docker compose ps -q app):/tmp/d1-backup ./d1-backup
+docker compose exec db mariadb-dump -uyuanqing -pyuanqing123 yuanqing > backup.sql
 
 # 恢复数据库
-docker cp ./d1-backup $(docker compose ps -q app):/app/.wrangler/state/v3/d1
-docker compose restart app
+docker compose exec -T db mariadb -uyuanqing -pyuanqing123 yuanqing < backup.sql
 ```
 
-#### 8. 不使用 Docker Compose（纯 Docker）
+#### 5. 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DB_HOST` | `db` | MariaDB 主机 |
+| `DB_PORT` | `3306` | MariaDB 端口 |
+| `DB_USER` | `yuanqing` | 数据库用户 |
+| `DB_PASS` | `yuanqing123` | 数据库密码 |
+| `DB_NAME` | `yuanqing` | 数据库名 |
+| `PORT` | `3000` | App 端口 |
+
+#### 6. 纯 Docker（不用 Compose）
 
 ```bash
-# 构建镜像
-docker build -t yuanqing-ai-viz .
+# 启动 MariaDB
+docker run -d --name yuanqing-db \
+  -e MARIADB_ROOT_PASSWORD=rootpass123 \
+  -e MARIADB_DATABASE=yuanqing \
+  -e MARIADB_USER=yuanqing \
+  -e MARIADB_PASSWORD=yuanqing123 \
+  -v yuanqing-mariadb-data:/var/lib/mysql \
+  -v $(pwd)/init.sql:/docker-entrypoint-initdb.d/init.sql:ro \
+  mariadb:11
 
-# 运行应用容器
-docker run -d \
-  --name yuanqing-ai \
-  -v yuanqing-d1-data:/app/.wrangler/state/v3/d1 \
-  --restart unless-stopped \
+# 构建 & 启动 App
+docker build -t yuanqing-ai-viz .
+docker run -d --name yuanqing-ai \
+  --link yuanqing-db:db \
+  -e DB_HOST=db \
   yuanqing-ai-viz
 
-# 运行 Nginx 容器（对外 80/443）
-docker run -d \
-  --name yuanqing-nginx \
-  -p 80:80 \
-  -p 443:443 \
+# 启动 Nginx
+docker run -d --name yuanqing-nginx \
+  -p 80:80 -p 443:443 \
   -v $(pwd)/nginx.conf:/etc/nginx/conf.d/default.conf:ro \
-  -v $(pwd)/certs:/etc/nginx/certs:ro \
   --link yuanqing-ai:app \
-  --restart unless-stopped \
   nginx:alpine
-
-# 查看日志
-docker logs -f yuanqing-ai
-docker logs -f yuanqing-nginx
 ```
 
 ---
 
-### 方式二：本地开发（非 Docker）
-
-#### 前置要求
-
-- Node.js >= 18
-- npm >= 9
-
-#### 1. 安装依赖
+### 方式二：本地开发
 
 ```bash
-git clone https://github.com/jibiao-ai/icloud99.git
-cd icloud99
+# 1. 安装 MariaDB 并创建数据库
+mysql -u root -e "CREATE DATABASE yuanqing; CREATE USER 'yuanqing'@'%' IDENTIFIED BY 'yuanqing123'; GRANT ALL ON yuanqing.* TO 'yuanqing'@'%';"
+mysql -u yuanqing -pyuanqing123 yuanqing < init.sql
+
+# 2. 安装依赖 & 构建
 npm install
-```
-
-#### 2. 初始化数据库
-
-```bash
-npm run db:migrate:local
-```
-
-#### 3. 构建并启动
-
-```bash
 npm run build
-npm run dev:sandbox
+
+# 3. 启动
+DB_HOST=127.0.0.1 npm start
 ```
 
-访问 `http://localhost:3000`。
-
-#### 4. 可用脚本
-
-```bash
-npm run build             # 构建项目
-npm run dev               # Vite 开发服务器
-npm run dev:sandbox       # Wrangler 本地开发（含 D1）
-npm run db:migrate:local  # 执行数据库迁移
-npm run db:reset          # 重置数据库（清空后重新迁移）
-```
+访问 `http://localhost:3000`
 
 ---
-
-### 方式三：Cloudflare Pages 部署
-
-#### 1. 创建 D1 数据库
-
-```bash
-npx wrangler d1 create yuanqing-db
-```
-
-将输出的 `database_id` 填入 `wrangler.jsonc`。
-
-#### 2. 执行迁移
-
-```bash
-npx wrangler d1 migrations apply yuanqing-db
-```
-
-#### 3. 部署
-
-```bash
-npm run build
-npx wrangler pages deploy dist --project-name yuanqing-ai-viz
-```
-
----
-
-## 使用指南
-
-### 首次使用
-
-1. 访问网站首页
-2. 点击左侧「管理设置」
-3. 使用 `admin` / `admin123` 登录
-4. 点击「初始化数据」生成 24 个检测渠道
-5. 为 OpenAI 各分组配置 API 密钥（URL: `https://api.icloud99.cn`，Key: `sk-xxx`）
-6. 返回「渠道状态」查看监控面板
-7. 进入「智力检测」运行鹈鹕骑行测试
-
-### 定时检测
-
-可通过外部定时任务（cron）调用接口实现自动检测：
-
-```bash
-# 每小时检测渠道状态
-0 * * * * curl -s -X POST http://localhost/api/test-channels
-
-# 每3小时运行智力检测（Lite → Standard → Ultra 轮转）
-0 0,3,6,9,12,15,18,21 * * * curl -s -X POST http://localhost/api/run-iq-test \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-5.6-sol","tier":"lite","provider":"openai"}'
-```
 
 ## 部署状态
 
-- **平台**: Cloudflare Pages / Docker
+- **数据库**: MariaDB 11
 - **对外端口**: 80 (HTTP) / 443 (HTTPS)
-- **状态**: ✅ Active
-- **技术栈**: Hono + TypeScript + Tailwind CSS + D1 (SQLite)
+- **技术栈**: Hono + Node.js + TypeScript + MariaDB
 - **GitHub**: https://github.com/jibiao-ai/icloud99
 - **最后更新**: 2026-09-17
