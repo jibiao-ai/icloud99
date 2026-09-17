@@ -96,28 +96,13 @@ app.get('/api/iq-tests', async (c) => {
   const db = c.env.DB
   const tier = c.req.query('tier') || ''
   const limit = parseInt(c.req.query('limit') || '50')
-  let sql = 'SELECT * FROM iq_tests WHERE 1=1'
+  let sql = 'SELECT id, provider, tier, model, test_type, result, score, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, tested_at FROM iq_tests WHERE 1=1'
   const params: any[] = []
   if (tier) { sql += ' AND tier = ?'; params.push(tier) }
   sql += ' ORDER BY tested_at DESC LIMIT ?'
   params.push(limit)
   const results = await db.prepare(sql).bind(...params).all()
-  // Return image_url (which now contains SVG code) but limit size for list view
-  const data = (results.results || []).map((r: any) => ({
-    ...r,
-    has_svg: !!(r.image_url && r.image_url.includes('<svg')),
-    image_url: r.image_url && r.image_url.includes('<svg') ? '' : r.image_url // Don't send full SVG in list, use svg endpoint
-  }))
-  return c.json({ code: 0, data })
-})
-
-// Get SVG content for a specific IQ test
-app.get('/api/iq-tests/:id/svg', async (c) => {
-  const id = c.req.param('id')
-  const db = c.env.DB
-  const result = await db.prepare('SELECT image_url FROM iq_tests WHERE id = ?').bind(id).first()
-  if (!result || !result.image_url) return c.json({ code: -1, message: '无SVG内容' })
-  return c.json({ code: 0, data: { svg: result.image_url } })
+  return c.json({ code: 0, data: results.results || [] })
 })
 
 app.get('/api/iq-tests/stats', async (c) => {
@@ -250,25 +235,31 @@ async function runCandyTest(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { result: 'degraded', score: 0, rawResponse: `Error: ${e.message}`, reasoningTokens: 0, inputTokens: 0, outputTokens: 0, responseTime: Date.now() - startTime } }
 }
 
-// Generate pelican-bicycle SVG (community benchmark: Simon Willison)
-// Prompt: "Generate an SVG of a pelican riding a bicycle"
-const PELICAN_SVG_PROMPT = `Generate an SVG of a pelican riding a bicycle. Output ONLY the raw SVG code starting with <svg and ending with </svg>. Do not include any explanation, markdown, or code fences. The SVG should have a viewBox of "0 0 400 400" and be self-contained.`
+// Generate pelican riding bicycle illustration (community benchmark)
+const PELICAN_POEMS = [
+  '面朝海风，情如潮涌。', '海风，情如潮。', '今天，趁风出发。',
+  '海风入怀，骑行远方。', '慢一点，海边有你就好。', '面朝大海，骑行未来。',
+  '海风，一位骑行者。', '向前迈进，去远方。', '风起时，鹈鹕在路上。',
+  '踏浪而行，逐风而歌。', '阳光正好，微风不燥。', '骑上单车，与海对话。',
+]
 
-async function generatePelicanSVG(baseUrl: string, apiKey: string, model: string) {
+async function generatePelicanImage(baseUrl: string, apiKey: string, tier: string) {
   try {
-    const resp = await fetch(baseUrl + '/v1/chat/completions', {
+    const poem = PELICAN_POEMS[Math.floor(Math.random() * PELICAN_POEMS.length)]
+    const resp = await fetch(baseUrl + '/v1/images/generations', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: PELICAN_SVG_PROMPT }], max_tokens: 8192, stream: false }),
+      body: JSON.stringify({
+        model: 'dall-e-3',
+        prompt: `A cute pelican riding a bicycle on a seaside road, sunny day, gentle breeze, watercolor illustration style, warm and soft tones, healing art, with Chinese text "${poem}" elegantly placed in the corner. The pelican looks happy and determined. Background has ocean, green hills, and golden sunlight.`,
+        n: 1,
+        size: '1024x1024'
+      }),
       signal: AbortSignal.timeout(120000)
     })
     if (!resp.ok) return null
     const data: any = await resp.json()
-    let content = data.choices?.[0]?.message?.content || ''
-    // Extract SVG from response (may have markdown fences)
-    const svgMatch = content.match(/<svg[\s\S]*?<\/svg>/i)
-    if (svgMatch) return svgMatch[0]
-    return null
+    return data.data?.[0]?.url || null
   } catch { return null }
 }
 
@@ -279,15 +270,15 @@ app.post('/api/run-iq-test', async (c) => {
   if (!config) return c.json({ code: -1, message: `未配置 ${provider}/${tier} 分组的API密钥，请先在管理设置中配置` }, 400)
   const cfg = JSON.parse(config.config_json as string)
   
-  // Run candy test + pelican SVG generation in parallel
-  const [result, svgContent] = await Promise.all([
+  // Run candy test + pelican image generation in parallel
+  const [result, imageUrl] = await Promise.all([
     runCandyTest(cfg.url, cfg.key, model),
-    generatePelicanSVG(cfg.url, cfg.key, model)
+    generatePelicanImage(cfg.url, cfg.key, tier).catch(() => null)
   ])
   
   await db.prepare(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
-    .bind(provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, svgContent || '').run()
-  return c.json({ code: 0, data: { ...result, svgContent } })
+    .bind(provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, imageUrl || '').run()
+  return c.json({ code: 0, data: { ...result, imageUrl } })
 })
 
 // ===== Seed with REAL keys =====

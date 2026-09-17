@@ -185,11 +185,6 @@ async function renderIQTest() {
   const stats = statsResp.data || [];
 
   const tiers = ['lite', 'standard', 'ultra'];
-  const resultBadge = (r) => {
-    if (r === 'pass') return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-600"><i class="fas fa-check-circle"></i>智力通过</span>`;
-    if (r === 'works') return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-600"><i class="fas fa-exclamation-circle"></i>可疑作品</span>`;
-    return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-500/15 text-red-600"><i class="fas fa-times-circle"></i>降智记录</span>`;
-  };
 
   // Group stats by tier
   const tierStats = {};
@@ -200,95 +195,58 @@ async function renderIQTest() {
   });
 
   let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-xs mt-1">Codex Candy Eval · 鹈鹕骑行智力测验 · 每3小时轮转检测 Lite → Standard → Ultra</p></div>
+    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-xs mt-1">Codex Candy Eval + Pelican Bicycle · 每3小时轮转 Lite → Standard → Ultra</p></div>
     <div class="flex gap-2">
       <button onclick="runIQTestForTier('lite')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Lite</button>
       <button onclick="runIQTestForTier('standard')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Standard</button>
       <button onclick="runIQTestForTier('ultra')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Ultra</button>
     </div></div>`;
 
-  // Per-tier cards with parrot images
-  html += `<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">`;
-  for (const tier of tiers) {
+  // Summary stats bar
+  const totalAll = Object.values(tierStats).reduce((a, s) => a + s.total, 0);
+  const passAll = Object.values(tierStats).reduce((a, s) => a + s.pass, 0);
+  const overallRate = totalAll > 0 ? Math.round(passAll / totalAll * 100) : 0;
+  html += `<div class="grid grid-cols-3 gap-3 mb-6">${tiers.map(tier => {
     const st = tierStats[tier] || { pass: 0, works: 0, degraded: 0, total: 0 };
-    const passRate = st.total > 0 ? Math.round(st.pass / st.total * 100) : 0;
-    const tierTests = tests.filter(t => t.tier === tier).slice(0, 3);
-    const latestTest = tierTests[0];
+    const rate = st.total > 0 ? Math.round(st.pass / st.total * 100) : 0;
     const nextRun = getNextRunTime(tier);
+    return `<div class="${cls.card()} p-3 fade-in"><div class="flex items-center justify-between mb-2">${tierBadge(tier)}<span class="text-lg font-bold ${rate >= 80 ? 'text-emerald-500' : rate >= 50 ? 'text-amber-500' : 'text-red-500'}">${rate}%</span></div>
+    <div class="flex gap-3 text-[11px] ${cls.textSub()} mb-1"><span>通过 ${st.pass}</span><span>可疑 ${st.works}</span><span>降智 ${st.degraded}</span></div>
+    <div class="h-1.5 rounded-full overflow-hidden flex ${isDark()?'bg-slate-700':'bg-gray-100'}"><div class="bg-emerald-500 h-full" style="width:${st.total>0?(st.pass/st.total*100):0}%"></div><div class="bg-amber-500 h-full" style="width:${st.total>0?(st.works/st.total*100):0}%"></div></div>
+    <div class="text-[10px] ${cls.textMuted()} mt-1.5"><i class="fas fa-clock mr-1"></i>下次: ${nextRun}</div></div>`;
+  }).join('')}</div>`;
 
-    // Result images from latest tests - ALWAYS show all 3 slots
-    const latestImages = tierTests.slice(0, 3);
+  // Grid cards for all test results (like the reference screenshot)
+  if (tests.length === 0) {
+    html += `<div class="text-center py-16 fade-in"><div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/20 flex items-center justify-center mx-auto mb-3"><i class="fas fa-bicycle text-2xl text-primary-500"></i></div><p class="${cls.text()} font-semibold">尚无检测记录</p><p class="${cls.textSub()} text-sm mt-1">点击上方按钮开始鹈鹕骑行智力检测</p></div>`;
+  } else {
+    html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">`;
+    tests.forEach(t => {
+      const hasImg = t.image_url && t.image_url.length > 10;
+      const resultColor = t.result === 'pass' ? 'from-emerald-500 to-emerald-600' : t.result === 'works' ? 'from-amber-500 to-amber-600' : 'from-red-500 to-red-600';
+      const resultText = t.result === 'pass' ? '智力通过' : t.result === 'works' ? '可疑作品' : '降智记录';
+      const resultIcon = t.result === 'pass' ? 'fa-check-circle' : t.result === 'works' ? 'fa-exclamation-circle' : 'fa-times-circle';
+      const timeStr = fmtTime(t.tested_at);
+      const elapsed = (t.response_time_ms / 1000).toFixed(1);
+      const idShort = String(t.id).padStart(4, '0');
 
-    html += `<div class="${cls.card()} overflow-hidden fade-in">
-      <div class="h-1.5 bg-gradient-to-r ${tierColor(tier)}"></div>
-      <div class="p-4">
-        <div class="flex items-center justify-between mb-3">${tierBadge(tier)}<span class="text-xl font-bold ${passRate >= 80 ? 'text-emerald-500' : passRate >= 50 ? 'text-amber-500' : 'text-red-500'}">${passRate}%</span></div>
-        
-        <div class="grid grid-cols-3 gap-2 mb-3">${[0,1,2].map(i => {
-          const t = latestImages[i];
-          if (!t) return `<div class="aspect-square rounded-lg ${isDark()?'bg-slate-700/60':'bg-gray-100'} flex flex-col items-center justify-center gap-1"><i class="fas fa-image text-xl ${cls.textMuted()}"></i><span class="text-[10px] ${cls.textMuted()}">等待检测</span></div>`;
-          const hasImg = t.image_url && t.image_url.length > 5;
-          const statusColor = t.result === 'pass' ? 'border-emerald-500' : t.result === 'works' ? 'border-amber-500' : 'border-red-500';
-          const statusIcon = t.result === 'pass' ? 'fa-check-circle text-emerald-500' : t.result === 'works' ? 'fa-exclamation-circle text-amber-500' : 'fa-times-circle text-red-500';
-          const statusText = t.result === 'pass' ? '通过' : t.result === 'works' ? '可疑' : '降智';
-          if (hasImg) {
-            return `<div class="relative aspect-square rounded-lg overflow-hidden border-2 ${statusColor} group cursor-pointer" onclick="showImageModal('${t.image_url.replace(/'/g, "\\'")}',' ${t.model} [${tierLabel(tier)}]','${statusText}','${t.result}')">
-              <img src="${t.image_url}" alt="鹈鹕骑行结果" class="w-full h-full object-cover transition-transform group-hover:scale-105">
-              <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent p-1.5">
-                <div class="flex items-center gap-1"><i class="fas ${statusIcon} text-[10px]"></i><span class="text-white text-[10px] font-medium">${statusText}</span></div>
-              </div>
-            </div>`;
-          } else {
-            return `<div class="relative aspect-square rounded-lg overflow-hidden border-2 ${statusColor} ${isDark()?'bg-slate-700/60':'bg-gray-100'} flex flex-col items-center justify-center gap-1">
-              <i class="fas ${statusIcon} text-2xl"></i>
-              <span class="text-[10px] font-semibold ${t.result === 'pass' ? 'text-emerald-500' : t.result === 'works' ? 'text-amber-500' : 'text-red-500'}">${statusText}</span>
-              <span class="text-[9px] ${cls.textMuted()}">${t.model}</span>
-              <span class="text-[9px] ${cls.textMuted()}">${fmtTime(t.tested_at)}</span>
-            </div>`;
-          }
-        }).join('')}</div>
-
-        <div class="space-y-2 mb-3">
-          ${latestTest ? `<div class="flex items-center gap-2 text-xs"><span class="${latestTest.result === 'pass' ? 'text-emerald-500' : latestTest.result === 'works' ? 'text-amber-500' : 'text-red-500'} font-semibold">${latestTest.result === 'pass' ? '✓ 生成完成' : latestTest.result === 'works' ? '◎ 可疑作品' : '✗ 降智记录'}</span></div>
-          <div class="text-xs ${cls.textSub()}">最近完成: ${fmtTime(latestTest.tested_at)} · 耗时 ${Math.round(latestTest.response_time_ms / 1000)} 秒</div>` : `<div class="text-xs ${cls.textMuted()}">暂无检测记录</div>`}
-          <div class="text-xs ${cls.textMuted()}">下次运行: ${nextRun}</div>
+      html += `<div class="${cls.card()} overflow-hidden fade-in group">
+        <div class="flex items-center justify-between px-2.5 py-1.5 text-[10px] ${isDark()?'bg-slate-700/50 text-slate-400':'bg-gray-50 text-gray-500'}">
+          <span class="font-mono">账号 ID: ${idShort}</span>
+          <span>${timeStr}</span>
         </div>
-
-        <div class="flex gap-2 text-xs mb-2">
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>通过 ${st.pass}</span>
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span>可疑 ${st.works}</span>
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span>降智 ${st.degraded}</span>
+        <div class="relative aspect-square ${isDark()?'bg-slate-900':'bg-gray-100'}">
+          ${hasImg ? `<img src="${t.image_url}" alt="鹈鹕骑行" class="w-full h-full object-cover cursor-pointer transition-transform group-hover:scale-105" onclick="showImageModal(this.src,'${t.model} [${tierLabel(t.tier)}]','${resultText}','${t.result}')">` : `<div class="w-full h-full flex flex-col items-center justify-center gap-2"><i class="fas fa-bicycle text-3xl ${cls.textMuted()}"></i><span class="text-xs ${cls.textMuted()}">无结果图</span></div>`}
+          <div class="absolute top-1.5 right-1.5"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white bg-gradient-to-r ${resultColor} shadow-md"><i class="fas ${resultIcon} text-[9px]"></i>${resultText}</span></div>
         </div>
-        <div class="h-2 rounded-full overflow-hidden flex ${isDark()?'bg-slate-700':'bg-gray-100'}">
-          <div class="bg-emerald-500 h-full" style="width:${st.total>0?(st.pass/st.total*100):0}%"></div>
-          <div class="bg-amber-500 h-full" style="width:${st.total>0?(st.works/st.total*100):0}%"></div>
-          <div class="bg-red-500 h-full" style="width:${st.total>0?(st.degraded/st.total*100):0}%"></div>
+        <div class="px-2.5 py-2 flex items-center justify-between">
+          <div class="flex items-center gap-1.5"><span class="font-mono text-[11px] ${cls.text()}">${t.model}</span>${tierBadge(t.tier)}</div>
+          <span class="font-mono text-[11px] ${cls.textSub()}">${elapsed} 秒</span>
         </div>
-      </div></div>`;
+      </div>`;
+    });
+    html += `</div>`;
   }
-  html += `</div>`;
-
-  // Records table
-  html += `<div class="${cls.card()} overflow-hidden"><div class="p-4 border-b ${isDark()?'border-slate-700':'border-gray-200'} flex items-center justify-between"><h3 class="text-sm font-semibold ${cls.text()}"><i class="fas fa-history mr-2"></i>检测记录</h3></div>
-    <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="${isDark()?'bg-slate-700/50':'bg-gray-50'}"><tr>
-      <th class="px-4 py-3 text-left ${cls.textSub()} font-medium text-xs">时间</th>
-      <th class="px-4 py-3 text-left ${cls.textSub()} font-medium text-xs">分组</th>
-      <th class="px-4 py-3 text-left ${cls.textSub()} font-medium text-xs">模型</th>
-      <th class="px-4 py-3 text-left ${cls.textSub()} font-medium text-xs">结果</th>
-      <th class="px-4 py-3 text-center ${cls.textSub()} font-medium text-xs">结果图</th>
-      <th class="px-4 py-3 text-right ${cls.textSub()} font-medium text-xs">耗时</th>
-      <th class="px-4 py-3 text-right ${cls.textSub()} font-medium text-xs">推理Token</th>
-    </tr></thead><tbody class="divide-y ${isDark()?'divide-slate-700':'divide-gray-100'}">
-      ${tests.slice(0, 30).map(t => `<tr class="${isDark()?'hover:bg-slate-700/30':'hover:bg-gray-50'} transition-colors">
-        <td class="px-4 py-3 text-xs ${cls.textMuted()}">${timeAgo(t.tested_at)}</td>
-        <td class="px-4 py-3">${tierBadge(t.tier)}</td>
-        <td class="px-4 py-3 font-mono text-xs ${cls.text()}">${t.model}</td>
-        <td class="px-4 py-3">${resultBadge(t.result)}</td>
-        <td class="px-4 py-3 text-center">${t.image_url && t.image_url.length > 5 ? `<img src="${t.image_url}" alt="结果图" class="w-10 h-10 rounded object-cover inline-block border ${isDark()?'border-slate-600':'border-gray-200'} cursor-pointer hover:scale-110 transition-transform" onclick="showImageModal('${t.image_url.replace(/'/g, "\\\\'")}','${t.model} [${tierLabel(t.tier)}]','${t.result === 'pass' ? '通过' : t.result === 'works' ? '可疑' : '降智'}','${t.result}')">` : `<span class="${cls.textMuted()} text-xs">-</span>`}</td>
-        <td class="px-4 py-3 text-right font-mono text-xs ${cls.text()}">${(t.response_time_ms/1000).toFixed(1)}s</td>
-        <td class="px-4 py-3 text-right font-mono text-xs ${cls.textSub()}">${t.reasoning_tokens||'-'}</td>
-      </tr>`).join('')}
-    </tbody></table></div></div>`;
 
   ct.innerHTML = html;
 }
@@ -298,25 +256,25 @@ function getNextRunTime(tier) {
   const now = new Date();
   const h = now.getHours();
   const idx = tiers.indexOf(tier);
-  // Each tier runs every 3h, offset by tier index
   const nextH = Math.ceil((h + 1) / 3) * 3 + idx;
   const next = new Date(now); next.setHours(nextH > 23 ? nextH - 24 : nextH, 0, 0, 0);
   if (next <= now) next.setHours(next.getHours() + 3);
   const diff = next - now;
   const mins = Math.floor(diff / 60000);
   const secs = Math.floor((diff % 60000) / 1000);
-  return `${next.toTimeString().substring(0, 8)} · ${mins}分${secs}秒后`;
+  return `${next.toTimeString().substring(0, 5)} · ${mins}分${secs}秒后`;
 }
 
 window.runIQTestForTier = async function(tier) {
-  toast(`正在为 ${tierLabel(tier)} 分组运行智力检测...`, 'info', 8000);
+  toast(`正在为 ${tierLabel(tier)} 分组运行鹈鹕骑行检测...`, 'info', 10000);
   const models = ['gpt-5.6-sol', 'gpt-6-astra'];
   for (const model of models) {
     try {
       const resp = await api.post('/run-iq-test', { model, tier, provider: 'openai' });
       if (resp.code === 0) {
         const r = resp.data;
-        toast(`${model} [${tierLabel(tier)}]: ${r.result === 'pass' ? '✓ 智力通过' : r.result === 'works' ? '◎ 可疑作品' : '✗ 降智记录'} (${(r.responseTime/1000).toFixed(1)}s)`, r.result === 'pass' ? 'success' : r.result === 'works' ? 'warning' : 'error', 5000);
+        const label = r.result === 'pass' ? '智力通过' : r.result === 'works' ? '可疑作品' : '降智记录';
+        toast(`${model} [${tierLabel(tier)}]: ${label} (${(r.responseTime/1000).toFixed(1)}s)${r.imageUrl ? ' · 已生成骑行图' : ''}`, r.result === 'pass' ? 'success' : r.result === 'works' ? 'warning' : 'error', 6000);
       } else { toast(`${model} [${tierLabel(tier)}]: ${resp.message}`, 'error'); }
     } catch (e) { toast(`${model} 测试出错: ${e.message}`, 'error'); }
   }
