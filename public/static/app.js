@@ -894,12 +894,14 @@ window.hideTooltip = function() { const t = document.getElementById('bar-tooltip
 const tokenUsageStore = {
   queryKey: '',
   loading: false,
-  data: null,       // { token_info, logs, total_logs, model_stats, daily_stats }
+  data: null,
   logPage: 1,
   logPageSize: 15,
-  logFilter: '',     // model filter
+  logFilter: '',
   logSort: 'time_desc',
-  activeTab: 'overview',  // overview | logs | stats
+  activeTab: 'stats',  // stats | logs | trend
+  statsPage: 1,
+  statsPageSize: 8,
 };
 
 async function renderTokenUsage() {
@@ -1012,34 +1014,36 @@ window.doTokenQuery = async function() {
   }
 };
 
+// Quota formatting helpers (1:1 CNY display, no USD conversion)
+const QUOTA_PER_UNIT = 500000;
+function fmtQuota(q) {
+  const v = q / QUOTA_PER_UNIT;
+  if (v >= 10000) return '¥' + (v / 10000).toFixed(2) + 'W';
+  if (v >= 1000) return '¥' + (v / 1000).toFixed(2) + 'K';
+  if (v >= 1) return '¥' + v.toFixed(2);
+  return '¥' + v.toFixed(4);
+}
+function fmtQuotaShort(q) {
+  const v = q / QUOTA_PER_UNIT;
+  if (v >= 1000) return '¥' + (v / 1000).toFixed(2) + 'K';
+  if (v >= 1) return '¥' + v.toFixed(2);
+  return '¥' + v.toFixed(4);
+}
+function fmtQuotaFull(q) {
+  return '¥' + (q / QUOTA_PER_UNIT).toFixed(6);
+}
+
 function renderTokenUsageResults(ct) {
   const d = isDark();
   const data = tokenUsageStore.data;
   if (!data) return;
 
   const info = data.token_info;
-  const logs = data.logs || [];
-  const modelStats = data.model_stats || {};
-  const dailyStats = data.daily_stats || {};
-  const tab = tokenUsageStore.activeTab;
-
-  // Quota calculations (New API uses internal units, 1 USD = 500000)
-  const QUOTA_PER_DOLLAR = 500000;
   const totalGranted = info.total_granted || 0;
   const totalUsed = info.total_used || 0;
   const totalAvailable = info.total_available || 0;
   const usedPercent = totalGranted > 0 ? ((totalUsed / totalGranted) * 100).toFixed(1) : '0';
-  const fmtQuota = (q) => {
-    const dollars = q / QUOTA_PER_DOLLAR;
-    if (dollars >= 1000) return '$' + (dollars / 1000).toFixed(2) + 'K';
-    return '$' + dollars.toFixed(2);
-  };
-  const fmtQuotaCNY = (q) => {
-    const usd = q / QUOTA_PER_DOLLAR;
-    const cny = usd * 7.2; // approx rate
-    if (cny >= 1000) return '¥' + (cny / 1000).toFixed(2) + 'K';
-    return '¥' + cny.toFixed(2);
-  };
+  const tab = tokenUsageStore.activeTab;
 
   // Token expire
   let expireText = '永不过期';
@@ -1051,7 +1055,7 @@ function renderTokenUsageResults(ct) {
   // Tab styles
   const tabCls = (t) => {
     if (t === tab) return `px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-sm transition-all`;
-    return `px-4 py-2 rounded-lg text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'} transition-all cursor-pointer`;
+    return `px-4 py-2 rounded-lg text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} transition-all cursor-pointer`;
   };
 
   let html = '';
@@ -1066,108 +1070,84 @@ function renderTokenUsageResults(ct) {
     <button onclick="doTokenQuery()" class="${cls.btnSec()} text-xs"><i class="fas fa-sync-alt mr-1"></i>刷新</button>
   </div>`;
 
-  // Overview cards - always visible
-  html += `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5 fade-in">`;
-
-  // Card: Total Granted
-  html += `<div class="${cls.card()} overflow-hidden group hover:border-cyan-500/40 transition-all">
-    <div class="h-0.5 bg-gradient-to-r from-cyan-400 to-cyan-600"></div>
-    <div class="p-4">
-      <div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">总额度</span><div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center group-hover:bg-cyan-500/20 transition-colors"><i class="fas fa-coins text-cyan-500 text-sm"></i></div></div>
-      <div class="text-xl font-bold ${cls.text()} font-mono">${info.unlimited_quota ? '∞' : fmtQuota(totalGranted)}</div>
-      <div class="${cls.textMuted()} text-[11px] mt-1 font-mono">${info.unlimited_quota ? '无限额度' : fmtQuotaCNY(totalGranted)}</div>
-    </div></div>`;
-
-  // Card: Used
-  html += `<div class="${cls.card()} overflow-hidden group hover:border-purple-500/40 transition-all">
-    <div class="h-0.5 bg-gradient-to-r from-purple-400 to-purple-600"></div>
-    <div class="p-4">
-      <div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">已使用</span><div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center group-hover:bg-purple-500/20 transition-colors"><i class="fas fa-fire text-purple-500 text-sm"></i></div></div>
-      <div class="text-xl font-bold ${cls.text()} font-mono">${fmtQuota(totalUsed)}</div>
-      <div class="${cls.textMuted()} text-[11px] mt-1 font-mono">${fmtQuotaCNY(totalUsed)} · ${usedPercent}%</div>
-    </div></div>`;
-
-  // Card: Remaining
-  const remainColor = parseFloat(usedPercent) > 90 ? 'red' : parseFloat(usedPercent) > 70 ? 'amber' : 'emerald';
-  html += `<div class="${cls.card()} overflow-hidden group hover:border-${remainColor}-500/40 transition-all">
-    <div class="h-0.5 bg-gradient-to-r from-${remainColor}-400 to-${remainColor}-600"></div>
-    <div class="p-4">
-      <div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">剩余额度</span><div class="w-8 h-8 rounded-lg bg-${remainColor}-500/10 flex items-center justify-center group-hover:bg-${remainColor}-500/20 transition-colors"><i class="fas fa-battery-three-quarters text-${remainColor}-500 text-sm"></i></div></div>
-      <div class="text-xl font-bold ${cls.text()} font-mono">${info.unlimited_quota ? '∞' : fmtQuota(totalAvailable)}</div>
-      <div class="${cls.textMuted()} text-[11px] mt-1 font-mono">${info.unlimited_quota ? '无限' : fmtQuotaCNY(totalAvailable)}</div>
-    </div></div>`;
-
-  // Card: Call Count
-  html += `<div class="${cls.card()} overflow-hidden group hover:border-amber-500/40 transition-all">
-    <div class="h-0.5 bg-gradient-to-r from-amber-400 to-orange-500"></div>
-    <div class="p-4">
-      <div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">调用次数</span><div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center group-hover:bg-amber-500/20 transition-colors"><i class="fas fa-bolt text-amber-500 text-sm"></i></div></div>
-      <div class="text-xl font-bold ${cls.text()} font-mono">${data.total_logs.toLocaleString()}</div>
-      <div class="${cls.textMuted()} text-[11px] mt-1"><i class="fas fa-clock mr-1"></i>${expireText}</div>
-    </div></div>`;
-
+  // === 4 Quota Overview Cards ===
+  html += `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 fade-in">`;
+  html += `<div class="${cls.card()} overflow-hidden group hover:border-cyan-500/40 transition-all"><div class="h-0.5 bg-gradient-to-r from-cyan-400 to-cyan-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">总额度</span><div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center"><i class="fas fa-coins text-cyan-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${info.unlimited_quota ? '∞' : fmtQuota(totalGranted)}</div><div class="${cls.textMuted()} text-[11px] mt-1">${info.unlimited_quota ? '无限额度' : '内部额度 ' + totalGranted.toLocaleString()}</div></div></div>`;
+  html += `<div class="${cls.card()} overflow-hidden group hover:border-purple-500/40 transition-all"><div class="h-0.5 bg-gradient-to-r from-purple-400 to-purple-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">已使用</span><div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center"><i class="fas fa-fire text-purple-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${fmtQuota(totalUsed)}</div><div class="${cls.textMuted()} text-[11px] mt-1 font-mono">占比 ${usedPercent}%</div></div></div>`;
+  const rc = parseFloat(usedPercent) > 90 ? 'red' : parseFloat(usedPercent) > 70 ? 'amber' : 'emerald';
+  html += `<div class="${cls.card()} overflow-hidden group hover:border-${rc}-500/40 transition-all"><div class="h-0.5 bg-gradient-to-r from-${rc}-400 to-${rc}-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">剩余额度</span><div class="w-8 h-8 rounded-lg bg-${rc}-500/10 flex items-center justify-center"><i class="fas fa-battery-three-quarters text-${rc}-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${info.unlimited_quota ? '∞' : fmtQuota(totalAvailable)}</div><div class="${cls.textMuted()} text-[11px] mt-1">${info.unlimited_quota ? '无限' : '内部额度 ' + totalAvailable.toLocaleString()}</div></div></div>`;
+  html += `<div class="${cls.card()} overflow-hidden group hover:border-amber-500/40 transition-all"><div class="h-0.5 bg-gradient-to-r from-amber-400 to-orange-500"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs font-medium">调用次数</span><div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center"><i class="fas fa-bolt text-amber-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.total_logs.toLocaleString()}</div><div class="${cls.textMuted()} text-[11px] mt-1"><i class="fas fa-clock mr-1"></i>${expireText}</div></div></div>`;
   html += `</div>`;
 
-  // Quota progress bar
+  // === Quota progress bar ===
   if (!info.unlimited_quota) {
-    html += `<div class="${cls.card()} p-4 mb-5 fade-in">
-      <div class="flex items-center justify-between mb-2"><span class="text-xs font-medium ${cls.textSub()}">额度使用进度</span><span class="text-xs font-bold font-mono ${parseFloat(usedPercent) > 90 ? 'text-red-500' : parseFloat(usedPercent) > 70 ? 'text-amber-500' : 'text-emerald-500'}">${usedPercent}%</span></div>
-      <div class="h-3 rounded-full overflow-hidden ${d ? 'bg-slate-700' : 'bg-gray-100'} relative">
-        <div class="h-full rounded-full bg-gradient-to-r ${parseFloat(usedPercent) > 90 ? 'from-red-500 to-red-600' : parseFloat(usedPercent) > 70 ? 'from-amber-500 to-orange-500' : 'from-emerald-400 to-cyan-500'} transition-all duration-1000 relative overflow-hidden" style="width:${Math.min(100, parseFloat(usedPercent))}%">
-          <div class="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 shimmer"></div>
-        </div>
-      </div>
-      <div class="flex justify-between mt-2 text-[11px] ${cls.textMuted()} font-mono">
-        <span>已用 ${fmtQuota(totalUsed)}</span>
-        <span>总计 ${fmtQuota(totalGranted)}</span>
-      </div>
-    </div>`;
+    html += `<div class="${cls.card()} p-4 mb-4 fade-in"><div class="flex items-center justify-between mb-2"><span class="text-xs font-medium ${cls.textSub()}">额度使用进度</span><span class="text-xs font-bold font-mono ${parseFloat(usedPercent) > 90 ? 'text-red-500' : parseFloat(usedPercent) > 70 ? 'text-amber-500' : 'text-emerald-500'}">${usedPercent}%</span></div><div class="h-3 rounded-full overflow-hidden ${d ? 'bg-slate-700' : 'bg-gray-100'} relative"><div class="h-full rounded-full bg-gradient-to-r ${parseFloat(usedPercent) > 90 ? 'from-red-500 to-red-600' : parseFloat(usedPercent) > 70 ? 'from-amber-500 to-orange-500' : 'from-emerald-400 to-cyan-500'} transition-all duration-1000 relative overflow-hidden" style="width:${Math.min(100, parseFloat(usedPercent))}%"><div class="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 shimmer"></div></div></div><div class="flex justify-between mt-2 text-[11px] ${cls.textMuted()} font-mono"><span>已用 ${fmtQuota(totalUsed)}</span><span>总计 ${fmtQuota(totalGranted)}</span></div></div>`;
   }
 
-  // Tab navigation
+  // === Token Detail Info (placed right after quota cards/progress) ===
+  html += `<div class="${cls.card()} overflow-hidden mb-5 fade-in">
+    <div class="px-5 py-3 border-b ${d ? 'border-slate-700' : 'border-gray-100'} flex items-center gap-2"><i class="fas fa-id-card text-primary-500 text-sm"></i><h3 class="text-sm font-semibold ${cls.text()}">令牌详细信息</h3></div>
+    <div class="p-5"><div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
+      <div><span class="${cls.textMuted()} text-xs block mb-0.5">令牌名称</span><span class="font-medium ${cls.text()} font-mono">${info.name || '-'}</span></div>
+      <div><span class="${cls.textMuted()} text-xs block mb-0.5">所属用户</span><span class="font-medium ${cls.text()}">${data.logs.length > 0 ? data.logs[0].username || '-' : '-'}</span></div>
+      <div><span class="${cls.textMuted()} text-xs block mb-0.5">所属分组</span><span class="font-medium ${cls.text()}">${data.logs.length > 0 ? data.logs[0].group || '-' : '-'}</span></div>
+      <div><span class="${cls.textMuted()} text-xs block mb-0.5">无限额度</span><span class="font-medium ${info.unlimited_quota ? 'text-emerald-500' : cls.text()}">${info.unlimited_quota ? '是' : '否'}</span></div>
+      <div><span class="${cls.textMuted()} text-xs block mb-0.5">模型限额</span><span class="font-medium ${cls.text()}">${info.model_limits_enabled ? '已启用' : '未启用'}</span></div>
+      <div><span class="${cls.textMuted()} text-xs block mb-0.5">过期时间</span><span class="font-medium ${cls.text()}">${info.expires_at > 0 ? new Date(info.expires_at * 1000).toLocaleString('zh-CN') : '永不过期'}</span></div>
+    </div>
+    ${info.model_limits_enabled && Object.keys(info.model_limits || {}).length > 0 ? `<div class="mt-3 pt-3 border-t ${d ? 'border-slate-700' : 'border-gray-100'}"><span class="${cls.textMuted()} text-xs block mb-2">允许的模型</span><div class="flex flex-wrap gap-1.5">${Object.keys(info.model_limits).map(m => `<span class="px-2 py-1 rounded-md text-[11px] font-mono ${d ? 'bg-slate-700 text-slate-300' : 'bg-gray-100 text-gray-700'}">${m}</span>`).join('')}</div></div>` : ''}
+    </div></div>`;
+
+  // === 3-Tab Navigation: 用量统计 | 调用日志 | 每日趋势 ===
   html += `<div class="flex items-center gap-2 mb-5 fade-in">
-    <button onclick="switchTokenTab('overview')" class="${tabCls('overview')}"><i class="fas fa-chart-pie mr-1.5"></i>用量统计</button>
+    <button onclick="switchTokenTab('stats')" class="${tabCls('stats')}"><i class="fas fa-chart-pie mr-1.5"></i>用量统计</button>
     <button onclick="switchTokenTab('logs')" class="${tabCls('logs')}"><i class="fas fa-list-alt mr-1.5"></i>调用日志 <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${tab==='logs'?'bg-white/20':'opacity-60'}">${data.total_logs}</span></button>
+    <button onclick="switchTokenTab('trend')" class="${tabCls('trend')}"><i class="fas fa-chart-area mr-1.5"></i>每日趋势</button>
   </div>`;
 
   // Tab content
-  if (tab === 'overview') {
+  if (tab === 'stats') {
     html += renderTokenStatsTab(data, d);
   } else if (tab === 'logs') {
     html += renderTokenLogsTab(data, d);
+  } else if (tab === 'trend') {
+    html += renderTokenTrendTab(data, d);
   }
 
   ct.innerHTML = html;
+
+  // If trend tab is active, draw the area chart after DOM is ready
+  if (tab === 'trend') {
+    setTimeout(() => drawTrendAreaChart(data, d), 50);
+  }
 }
 
 window.switchTokenTab = function(tab) {
   tokenUsageStore.activeTab = tab;
-  tokenUsageStore.logPage = 1;
+  if (tab === 'logs') tokenUsageStore.logPage = 1;
+  if (tab === 'stats') tokenUsageStore.statsPage = 1;
   const ct = document.getElementById('page-content');
   renderTokenUsageResults(ct);
 };
 
 function renderTokenStatsTab(data, d) {
   const modelStats = data.model_stats || {};
-  const dailyStats = data.daily_stats || {};
-  const QUOTA_PER_DOLLAR = 500000;
-  const fmtQ = (q) => '$' + (q / QUOTA_PER_DOLLAR).toFixed(4);
-  const fmtQShort = (q) => {
-    const v = q / QUOTA_PER_DOLLAR;
-    return v >= 1 ? '$' + v.toFixed(2) : '$' + v.toFixed(4);
-  };
-
-  // Sort models by quota desc
   const sortedModels = Object.entries(modelStats).sort((a, b) => b[1].quota - a[1].quota);
   const maxModelQuota = sortedModels.length > 0 ? sortedModels[0][1].quota : 1;
 
-  // Model colors
   const modelColors = ['from-cyan-400 to-cyan-600', 'from-purple-400 to-purple-600', 'from-amber-400 to-orange-500', 'from-emerald-400 to-emerald-600', 'from-pink-400 to-rose-500', 'from-blue-400 to-indigo-500', 'from-teal-400 to-teal-600', 'from-red-400 to-red-600'];
   const modelDots = ['bg-cyan-500', 'bg-purple-500', 'bg-amber-500', 'bg-emerald-500', 'bg-pink-500', 'bg-blue-500', 'bg-teal-500', 'bg-red-500'];
 
-  let html = `<div class="space-y-5 fade-in">`;
+  // Pagination for stats
+  const pageSize = tokenUsageStore.statsPageSize;
+  const totalItems = sortedModels.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const page = Math.min(tokenUsageStore.statsPage, totalPages);
+  tokenUsageStore.statsPage = page;
+  const startIdx = (page - 1) * pageSize;
+  const pageModels = sortedModels.slice(startIdx, startIdx + pageSize);
 
-  // Model breakdown
+  let html = `<div class="fade-in">`;
   html += `<div class="${cls.card()} overflow-hidden">
     <div class="px-5 py-4 border-b ${d ? 'border-slate-700' : 'border-gray-100'} flex items-center gap-2">
       <i class="fas fa-cubes text-primary-500"></i>
@@ -1180,16 +1160,17 @@ function renderTokenStatsTab(data, d) {
     html += `<div class="text-center py-8"><i class="fas fa-inbox text-3xl ${cls.textMuted()} mb-2"></i><p class="${cls.textSub()} text-sm">暂无模型使用数据</p></div>`;
   } else {
     html += `<div class="space-y-4">`;
-    sortedModels.forEach(([model, stats], idx) => {
+    pageModels.forEach(([model, stats], idx) => {
+      const globalIdx = startIdx + idx;
       const pct = maxModelQuota > 0 ? ((stats.quota / maxModelQuota) * 100).toFixed(1) : 0;
-      const colorGrad = modelColors[idx % modelColors.length];
-      const dotColor = modelDots[idx % modelDots.length];
+      const colorGrad = modelColors[globalIdx % modelColors.length];
+      const dotColor = modelDots[globalIdx % modelDots.length];
       html += `<div>
         <div class="flex items-center justify-between mb-1.5">
           <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full ${dotColor}"></span><span class="text-sm font-medium font-mono ${cls.text()}">${model}</span></div>
           <div class="flex items-center gap-4 text-xs ${cls.textSub()}">
             <span><i class="fas fa-hashtag mr-1 text-[10px]"></i>${stats.count} 次</span>
-            <span><i class="fas fa-coins mr-1 text-[10px]"></i>${fmtQShort(stats.quota)}</span>
+            <span><i class="fas fa-coins mr-1 text-[10px]"></i>${fmtQuotaShort(stats.quota)}</span>
             <span><i class="fas fa-clock mr-1 text-[10px]"></i>~${stats.avgTime}s</span>
           </div>
         </div>
@@ -1204,63 +1185,229 @@ function renderTokenStatsTab(data, d) {
     });
     html += `</div>`;
   }
-  html += `</div></div>`;
+  html += `</div>`;
 
-  // Daily usage chart (text-based bar chart)
-  const dailyEntries = Object.entries(dailyStats).sort((a, b) => a[0].localeCompare(b[0])).slice(-30);
-  if (dailyEntries.length > 0) {
-    const maxDailyQuota = Math.max(...dailyEntries.map(([, s]) => s.quota));
-    const maxDailyCount = Math.max(...dailyEntries.map(([, s]) => s.count));
-
-    html += `<div class="${cls.card()} overflow-hidden">
-      <div class="px-5 py-4 border-b ${d ? 'border-slate-700' : 'border-gray-100'} flex items-center gap-2">
-        <i class="fas fa-calendar-alt text-primary-500"></i>
-        <h3 class="text-sm font-semibold ${cls.text()}">每日用量趋势</h3>
-        <span class="${cls.textMuted()} text-xs ml-auto">最近 ${dailyEntries.length} 天</span>
-      </div>
-      <div class="p-5 overflow-x-auto scrollbar-thin">
-        <div class="flex items-end gap-1" style="min-width:${Math.max(dailyEntries.length * 28, 300)}px;height:140px;">`;
-
-    dailyEntries.forEach(([date, stats]) => {
-      const barH = maxDailyQuota > 0 ? Math.max(4, (stats.quota / maxDailyQuota) * 120) : 4;
-      const dayLabel = date.slice(5); // MM-DD
-      html += `<div class="flex-1 flex flex-col items-center gap-1">
-        <div class="w-full rounded-t px-0.5 bg-gradient-to-t from-primary-500 to-cyan-400 transition-all hover:from-primary-600 hover:to-cyan-500 cursor-pointer relative group" style="height:${barH}px;min-width:18px"
-          onmouseenter="showTooltip(event,this)" onmouseleave="hideTooltip()" data-tooltip="${date} · ${stats.count}次调用 · $${(stats.quota/500000).toFixed(4)}">
-        </div>
-        <span class="${cls.textMuted()} text-[9px] font-mono whitespace-nowrap" style="transform:rotate(-45deg);transform-origin:center;display:block;width:36px;text-align:center">${dayLabel}</span>
-      </div>`;
-    });
-
-    html += `</div>
-      </div></div>`;
+  // Pagination for stats
+  if (totalPages > 1) {
+    html += renderGenericPagination(page, totalPages, totalItems, 'goStatsPage', 'sp-page-jump', 'jumpStatsPage', d);
   }
 
-  // Token info details
-  html += `<div class="${cls.card()} overflow-hidden">
-    <div class="px-5 py-4 border-b ${d ? 'border-slate-700' : 'border-gray-100'} flex items-center gap-2">
-      <i class="fas fa-info-circle text-primary-500"></i>
-      <h3 class="text-sm font-semibold ${cls.text()}">令牌详细信息</h3>
-    </div>
-    <div class="p-5">
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-        <div><span class="${cls.textMuted()} text-xs block mb-1">令牌名称</span><span class="font-medium ${cls.text()} font-mono">${data.token_info.name || '-'}</span></div>
-        <div><span class="${cls.textMuted()} text-xs block mb-1">所属用户</span><span class="font-medium ${cls.text()}">${data.logs.length > 0 ? data.logs[0].username || '-' : '-'}</span></div>
-        <div><span class="${cls.textMuted()} text-xs block mb-1">所属分组</span><span class="font-medium ${cls.text()}">${data.logs.length > 0 ? data.logs[0].group || '-' : '-'}</span></div>
-        <div><span class="${cls.textMuted()} text-xs block mb-1">无限额度</span><span class="font-medium ${data.token_info.unlimited_quota ? 'text-emerald-500' : cls.text()}">${data.token_info.unlimited_quota ? '是' : '否'}</span></div>
-        <div><span class="${cls.textMuted()} text-xs block mb-1">模型限额</span><span class="font-medium ${cls.text()}">${data.token_info.model_limits_enabled ? '已启用' : '未启用'}</span></div>
-        <div><span class="${cls.textMuted()} text-xs block mb-1">过期时间</span><span class="font-medium ${cls.text()}">${data.token_info.expires_at > 0 ? new Date(data.token_info.expires_at * 1000).toLocaleString('zh-CN') : '永不过期'}</span></div>
-      </div>
-      ${data.token_info.model_limits_enabled && Object.keys(data.token_info.model_limits || {}).length > 0 ? `<div class="mt-4 pt-4 border-t ${d ? 'border-slate-700' : 'border-gray-100'}"><span class="${cls.textMuted()} text-xs block mb-2">允许的模型</span><div class="flex flex-wrap gap-1.5">${Object.keys(data.token_info.model_limits).map(m => `<span class="px-2 py-1 rounded-md text-[11px] font-mono ${d ? 'bg-slate-700 text-slate-300' : 'bg-gray-100 text-gray-700'}">${m}</span>`).join('')}</div></div>` : ''}
-    </div></div>`;
+  html += `</div></div>`;
+  return html;
+}
 
+// Generic pagination renderer shared by stats and logs
+function renderGenericPagination(currentPage, totalPages, total, goFn, jumpId, jumpFn, d) {
+  const btnBase = `px-3 py-2 rounded-lg text-sm font-medium transition-all`;
+  const btnActive = `${btnBase} bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm`;
+  const btnNormal = `${btnBase} ${d ? 'text-slate-300 hover:bg-slate-700 border border-slate-600' : 'text-gray-700 hover:bg-gray-100 border border-gray-300'}`;
+  const btnDis = `${btnBase} ${d ? 'text-slate-600 border border-slate-700 cursor-not-allowed' : 'text-gray-300 border border-gray-200 cursor-not-allowed'}`;
+
+  let pages = [1];
+  let start = Math.max(2, currentPage - 2), end = Math.min(totalPages - 1, currentPage + 2);
+  if (start > 2) pages.push('...');
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (end < totalPages - 1) pages.push('...');
+  if (totalPages > 1) pages.push(totalPages);
+
+  let html = `<div class="flex items-center justify-center gap-2 p-4 border-t ${d ? 'border-slate-700' : 'border-gray-100'} flex-wrap">`;
+  html += `<button onclick="${goFn}(1)" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
+  html += `<button onclick="${goFn}(${currentPage-1})" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="上一页"><i class="fas fa-angle-left text-xs"></i></button>`;
+  for (const p of pages) {
+    if (p === '...') html += `<span class="px-2 py-2 text-sm ${cls.textMuted()}">…</span>`;
+    else html += `<button onclick="${goFn}(${p})" class="${p===currentPage?btnActive:btnNormal}">${p}</button>`;
+  }
+  html += `<button onclick="${goFn}(${currentPage+1})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="下一页"><i class="fas fa-angle-right text-xs"></i></button>`;
+  html += `<button onclick="${goFn}(${totalPages})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
+  html += `<div class="flex items-center gap-2 ml-4"><span class="${cls.textSub()} text-sm">跳至</span><input id="${jumpId}" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')${jumpFn}()"><span class="${cls.textSub()} text-sm">页</span><button onclick="${jumpFn}()" class="${btnNormal} !px-3 !py-1.5">GO</button></div>`;
+  html += `<span class="${cls.textMuted()} text-xs ml-3">共 ${total} 条 / ${totalPages} 页</span>`;
   html += `</div>`;
   return html;
 }
 
+window.goStatsPage = function(p) {
+  const totalPages = Math.max(1, Math.ceil(Object.keys(tokenUsageStore.data?.model_stats || {}).length / tokenUsageStore.statsPageSize));
+  if (p < 1) p = 1;
+  if (p > totalPages) p = totalPages;
+  tokenUsageStore.statsPage = p;
+  const ct = document.getElementById('page-content');
+  renderTokenUsageResults(ct);
+};
+window.jumpStatsPage = function() {
+  const input = document.getElementById('sp-page-jump');
+  if (!input) return;
+  let p = parseInt(input.value);
+  if (isNaN(p) || p < 1) p = 1;
+  goStatsPage(p);
+};
+
+// ===== Trend Tab: Area Chart using Canvas =====
+function renderTokenTrendTab(data, d) {
+  const dailyStats = data.daily_stats || {};
+  const entries = Object.entries(dailyStats).sort((a, b) => a[0].localeCompare(b[0])).slice(-30);
+
+  let html = `<div class="fade-in">
+    <div class="${cls.card()} overflow-hidden">
+      <div class="px-5 py-4 border-b ${d ? 'border-slate-700' : 'border-gray-100'} flex items-center gap-2">
+        <i class="fas fa-chart-area text-primary-500"></i>
+        <h3 class="text-sm font-semibold ${cls.text()}">每日用量趋势</h3>
+        <span class="${cls.textMuted()} text-xs ml-auto">最近 ${entries.length} 天</span>
+      </div>
+      <div class="p-5">
+        ${entries.length === 0
+          ? `<div class="text-center py-12"><i class="fas fa-chart-area text-4xl ${cls.textMuted()} mb-3"></i><p class="${cls.textSub()} text-sm">暂无每日用量数据</p></div>`
+          : `<canvas id="trend-area-canvas" width="800" height="320" style="width:100%;height:320px;display:block"></canvas>
+             <div id="trend-legend" class="flex items-center justify-center gap-6 mt-4 text-xs ${cls.textSub()}">
+               <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-gradient-to-r from-primary-400 to-cyan-400"></span>费用 (¥)</span>
+               <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-gradient-to-r from-amber-400 to-orange-400"></span>调用次数</span>
+             </div>`}
+      </div>
+    </div></div>`;
+  return html;
+}
+
+function drawTrendAreaChart(data, d) {
+  const canvas = document.getElementById('trend-area-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = rect.height;
+
+  const dailyStats = data.daily_stats || {};
+  const entries = Object.entries(dailyStats).sort((a, b) => a[0].localeCompare(b[0])).slice(-30);
+  if (entries.length === 0) return;
+
+  const pad = { top: 20, right: 60, bottom: 50, left: 60 };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top - pad.bottom;
+
+  const quotas = entries.map(([, s]) => s.quota / QUOTA_PER_UNIT);
+  const counts = entries.map(([, s]) => s.count);
+  const maxQ = Math.max(...quotas) * 1.15 || 1;
+  const maxC = Math.max(...counts) * 1.15 || 1;
+
+  const textColor = d ? '#94a3b8' : '#6b7280';
+  const gridColor = d ? 'rgba(71,85,105,0.4)' : 'rgba(229,231,235,0.8)';
+
+  // Grid lines
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 5; i++) {
+    const y = pad.top + (cH / 5) * i;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+  }
+
+  // Y-axis labels (left: quota)
+  ctx.fillStyle = textColor;
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    const v = maxQ - (maxQ / 5) * i;
+    const y = pad.top + (cH / 5) * i;
+    ctx.fillText('¥' + (v >= 1 ? v.toFixed(1) : v.toFixed(3)), pad.left - 8, y + 4);
+  }
+  // Y-axis labels (right: count)
+  ctx.textAlign = 'left';
+  for (let i = 0; i <= 5; i++) {
+    const v = maxC - (maxC / 5) * i;
+    const y = pad.top + (cH / 5) * i;
+    ctx.fillText(Math.round(v) + '次', W - pad.right + 8, y + 4);
+  }
+
+  // X-axis labels
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.ceil(entries.length / 10));
+  entries.forEach(([date], idx) => {
+    if (idx % step === 0 || idx === entries.length - 1) {
+      const x = pad.left + (cW / (entries.length - 1 || 1)) * idx;
+      ctx.save();
+      ctx.translate(x, pad.top + cH + 16);
+      ctx.rotate(-Math.PI / 6);
+      ctx.fillText(date.slice(5), 0, 0);
+      ctx.restore();
+    }
+  });
+
+  // Helper: get point coordinates
+  const getX = (i) => pad.left + (cW / (entries.length - 1 || 1)) * i;
+  const getYQ = (v) => pad.top + cH - (v / maxQ) * cH;
+  const getYC = (v) => pad.top + cH - (v / maxC) * cH;
+
+  // Draw quota area
+  const gradQ = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+  gradQ.addColorStop(0, d ? 'rgba(108,92,231,0.35)' : 'rgba(108,92,231,0.25)');
+  gradQ.addColorStop(1, d ? 'rgba(108,92,231,0.02)' : 'rgba(108,92,231,0.02)');
+  ctx.fillStyle = gradQ;
+  ctx.beginPath();
+  ctx.moveTo(getX(0), pad.top + cH);
+  quotas.forEach((v, i) => ctx.lineTo(getX(i), getYQ(v)));
+  ctx.lineTo(getX(entries.length - 1), pad.top + cH);
+  ctx.closePath();
+  ctx.fill();
+
+  // Draw quota line
+  ctx.strokeStyle = d ? '#7a68ff' : '#6C5CE7';
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  quotas.forEach((v, i) => { i === 0 ? ctx.moveTo(getX(i), getYQ(v)) : ctx.lineTo(getX(i), getYQ(v)); });
+  ctx.stroke();
+
+  // Draw count area
+  const gradC = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+  gradC.addColorStop(0, d ? 'rgba(245,158,11,0.25)' : 'rgba(245,158,11,0.15)');
+  gradC.addColorStop(1, d ? 'rgba(245,158,11,0.02)' : 'rgba(245,158,11,0.02)');
+  ctx.fillStyle = gradC;
+  ctx.beginPath();
+  ctx.moveTo(getX(0), pad.top + cH);
+  counts.forEach((v, i) => ctx.lineTo(getX(i), getYC(v)));
+  ctx.lineTo(getX(entries.length - 1), pad.top + cH);
+  ctx.closePath();
+  ctx.fill();
+
+  // Draw count line
+  ctx.strokeStyle = d ? '#f59e0b' : '#d97706';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 3]);
+  ctx.beginPath();
+  counts.forEach((v, i) => { i === 0 ? ctx.moveTo(getX(i), getYC(v)) : ctx.lineTo(getX(i), getYC(v)); });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw dots on quota line
+  quotas.forEach((v, i) => {
+    ctx.beginPath();
+    ctx.arc(getX(i), getYQ(v), 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = d ? '#7a68ff' : '#6C5CE7';
+    ctx.fill();
+    ctx.strokeStyle = d ? '#1e293b' : '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+
+  // Canvas hover tooltip
+  canvas.onmousemove = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const closestIdx = Math.round(((mx - pad.left) / cW) * (entries.length - 1));
+    if (closestIdx >= 0 && closestIdx < entries.length) {
+      const [date, stats] = entries[closestIdx];
+      let tip = document.getElementById('bar-tooltip');
+      if (!tip) { tip = document.createElement('div'); tip.id = 'bar-tooltip'; tip.style.cssText = 'position:fixed;pointer-events:none;z-index:9999;padding:8px 14px;border-radius:10px;font-size:12px;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.3);line-height:1.6'; document.body.appendChild(tip); }
+      tip.style.background = d ? '#1e293b' : '#111827'; tip.style.color = '#fff'; tip.style.border = d ? '1px solid #334155' : '1px solid #374151';
+      tip.innerHTML = `<div style="font-weight:600;margin-bottom:2px">${date}</div><div>费用: ¥${(stats.quota/QUOTA_PER_UNIT).toFixed(4)}</div><div>调用: ${stats.count} 次</div>`;
+      tip.style.opacity = '1';
+      tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 40) + 'px';
+    }
+  };
+  canvas.onmouseleave = function() { hideTooltip(); };
+}
+
 function renderTokenLogsTab(data, d) {
-  const QUOTA_PER_DOLLAR = 500000;
-  const fmtQ = (q) => '$' + (q / QUOTA_PER_DOLLAR).toFixed(6);
   let logs = data.logs || [];
 
   // Model filter
@@ -1333,7 +1480,7 @@ function renderTokenLogsTab(data, d) {
     pageLogs.forEach((log, idx) => {
       const time = new Date(log.created_at * 1000);
       const timeStr = time.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const cost = fmtQ(log.quota);
+      const cost = fmtQuotaFull(log.quota);
       const other = log.other_parsed || {};
       const rowBg = idx % 2 === 0 ? '' : (d ? 'bg-slate-800/30' : 'bg-gray-50/50');
 
@@ -1352,40 +1499,12 @@ function renderTokenLogsTab(data, d) {
 
   html += `</tbody></table></div>`;
 
-  // Pagination for logs
+  // Pagination for logs (using shared pagination component)
   if (totalPages > 1) {
-    html += renderTokenLogPagination(page, totalPages, totalItems, d);
+    html += renderGenericPagination(page, totalPages, totalItems, 'goTokenLogPage', 'tl-page-jump', 'jumpTokenLogPage', d);
   }
 
   html += `</div></div>`;
-  return html;
-}
-
-function renderTokenLogPagination(currentPage, totalPages, total, d) {
-  const btnBase = `px-3 py-2 rounded-lg text-sm font-medium transition-all`;
-  const btnActive = `${btnBase} bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm`;
-  const btnNormal = `${btnBase} ${d ? 'text-slate-300 hover:bg-slate-700 border border-slate-600' : 'text-gray-700 hover:bg-gray-100 border border-gray-300'}`;
-  const btnDis = `${btnBase} ${d ? 'text-slate-600 border border-slate-700 cursor-not-allowed' : 'text-gray-300 border border-gray-200 cursor-not-allowed'}`;
-
-  let pages = [1];
-  let start = Math.max(2, currentPage - 2), end = Math.min(totalPages - 1, currentPage + 2);
-  if (start > 2) pages.push('...');
-  for (let i = start; i <= end; i++) pages.push(i);
-  if (end < totalPages - 1) pages.push('...');
-  if (totalPages > 1) pages.push(totalPages);
-
-  let html = `<div class="flex items-center justify-center gap-2 p-4 border-t ${d ? 'border-slate-700' : 'border-gray-100'} flex-wrap">`;
-  html += `<button onclick="goTokenLogPage(1)" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
-  html += `<button onclick="goTokenLogPage(${currentPage-1})" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="上一页"><i class="fas fa-angle-left text-xs"></i></button>`;
-  for (const p of pages) {
-    if (p === '...') html += `<span class="px-2 py-2 text-sm ${cls.textMuted()}">…</span>`;
-    else html += `<button onclick="goTokenLogPage(${p})" class="${p===currentPage?btnActive:btnNormal}">${p}</button>`;
-  }
-  html += `<button onclick="goTokenLogPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="下一页"><i class="fas fa-angle-right text-xs"></i></button>`;
-  html += `<button onclick="goTokenLogPage(${totalPages})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
-  html += `<div class="flex items-center gap-2 ml-4"><span class="${cls.textSub()} text-sm">跳至</span><input id="tl-page-jump" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')jumpTokenLogPage()"><span class="${cls.textSub()} text-sm">页</span><button onclick="jumpTokenLogPage()" class="${btnNormal} !px-3 !py-1.5">GO</button></div>`;
-  html += `<span class="${cls.textMuted()} text-xs ml-3">共 ${total} 条 / ${totalPages} 页</span>`;
-  html += `</div>`;
   return html;
 }
 
@@ -1440,7 +1559,6 @@ window.showLogDetail = function(idx) {
   const log = logs[idx];
   if (!log) return;
   const d = isDark();
-  const QUOTA_PER_DOLLAR = 500000;
   const time = new Date(log.created_at * 1000);
   const other = log.other_parsed || {};
 
@@ -1463,7 +1581,7 @@ window.showLogDetail = function(idx) {
               <div><span class="${cls.textMuted()} text-xs block mb-0.5">分组</span><span class="${cls.text()}">${log.group || '-'}</span></div>
             </div>
             <div class="space-y-3">
-              <div><span class="${cls.textMuted()} text-xs block mb-0.5">费用</span><span class="font-mono font-bold text-amber-500">$${(log.quota / QUOTA_PER_DOLLAR).toFixed(6)}</span></div>
+              <div><span class="${cls.textMuted()} text-xs block mb-0.5">费用</span><span class="font-mono font-bold text-amber-500">${fmtQuotaFull(log.quota)}</span></div>
               <div><span class="${cls.textMuted()} text-xs block mb-0.5">Prompt Tokens</span><span class="font-mono ${cls.text()}">${(log.prompt_tokens || 0).toLocaleString()}</span></div>
               <div><span class="${cls.textMuted()} text-xs block mb-0.5">Completion Tokens</span><span class="font-mono ${cls.text()}">${(log.completion_tokens || 0).toLocaleString()}</span></div>
               <div><span class="${cls.textMuted()} text-xs block mb-0.5">耗时</span><span class="font-mono ${cls.text()}">${log.use_time || 0} 秒</span></div>

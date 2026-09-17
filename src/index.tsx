@@ -457,13 +457,22 @@ app.post('/api/token-usage/query', async (c) => {
       if (modelStats[m].count > 0) modelStats[m].avgTime = Math.round(modelStats[m].avgTime / modelStats[m].count)
     }
 
-    // Daily usage stats (last 30 days)
-    const dailyStats: Record<string, { count: number; quota: number }> = {}
+    // Daily usage stats (last 30 days, fill in all dates with zeros)
+    const dailyStatsRaw: Record<string, { count: number; quota: number }> = {}
     for (const log of parsedLogs) {
       const date = new Date(log.created_at * 1000).toISOString().slice(0, 10)
-      if (!dailyStats[date]) dailyStats[date] = { count: 0, quota: 0 }
-      dailyStats[date].count++
-      dailyStats[date].quota += log.quota || 0
+      if (!dailyStatsRaw[date]) dailyStatsRaw[date] = { count: 0, quota: 0 }
+      dailyStatsRaw[date].count++
+      dailyStatsRaw[date].quota += log.quota || 0
+    }
+    // Fill 30 days
+    const dailyStats: Record<string, { count: number; quota: number }> = {}
+    const now = new Date()
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i)
+      const key = d.toISOString().slice(0, 10)
+      dailyStats[key] = dailyStatsRaw[key] || { count: 0, quota: 0 }
     }
 
     return c.json({
