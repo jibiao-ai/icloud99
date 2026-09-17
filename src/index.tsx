@@ -96,7 +96,7 @@ app.get('/api/iq-tests', async (c) => {
   const db = c.env.DB
   const tier = c.req.query('tier') || ''
   const limit = parseInt(c.req.query('limit') || '50')
-  let sql = 'SELECT id, provider, tier, model, test_type, result, score, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, tested_at FROM iq_tests WHERE 1=1'
+  let sql = 'SELECT id, provider, tier, model, test_type, result, score, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at FROM iq_tests WHERE 1=1'
   const params: any[] = []
   if (tier) { sql += ' AND tier = ?'; params.push(tier) }
   sql += ' ORDER BY tested_at DESC LIMIT ?'
@@ -235,32 +235,41 @@ async function runCandyTest(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { result: 'degraded', score: 0, rawResponse: `Error: ${e.message}`, reasoningTokens: 0, inputTokens: 0, outputTokens: 0, responseTime: Date.now() - startTime } }
 }
 
-// Generate pelican riding bicycle illustration (community benchmark)
-const PELICAN_POEMS = [
-  '面朝海风，情如潮涌。', '海风，情如潮。', '今天，趁风出发。',
-  '海风入怀，骑行远方。', '慢一点，海边有你就好。', '面朝大海，骑行未来。',
-  '海风，一位骑行者。', '向前迈进，去远方。', '风起时，鹈鹕在路上。',
-  '踏浪而行，逐风而歌。', '阳光正好，微风不燥。', '骑上单车，与海对话。',
-]
+// Generate pelican riding bicycle SVG animation via chat completions (community benchmark prompt)
+const SVG_PROMPT_EN = `Create a single, complete, self-contained animated SVG, no external files. Side view, a cute pelican riding a bicycle. Pelican webbed feet on pedals, wings gripping handlebars, large orange throat pouch. Bicycle with frame, seat, pedals, rotating spoked wheels. CSS keyframe animation, wheels spin, legs pedal. Simple background, sky and road. Flat cartoon style, clean path, no JS. Output ONLY the SVG code, no explanations.`
 
-async function generatePelicanImage(baseUrl: string, apiKey: string, tier: string) {
-  try {
-    const poem = PELICAN_POEMS[Math.floor(Math.random() * PELICAN_POEMS.length)]
-    const resp = await fetch(baseUrl + '/v1/images/generations', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'dall-e-3',
-        prompt: `A cute pelican riding a bicycle on a seaside road, sunny day, gentle breeze, watercolor illustration style, warm and soft tones, healing art, with Chinese text "${poem}" elegantly placed in the corner. The pelican looks happy and determined. Background has ocean, green hills, and golden sunlight.`,
-        n: 1,
-        size: '1024x1024'
-      }),
-      signal: AbortSignal.timeout(120000)
-    })
-    if (!resp.ok) return null
-    const data: any = await resp.json()
-    return data.data?.[0]?.url || null
-  } catch { return null }
+const SVG_MODELS = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5']
+
+async function generatePelicanSVG(baseUrl: string, apiKey: string, model?: string): Promise<string | null> {
+  const modelsToTry = model ? [model, ...SVG_MODELS.filter(m => m !== model)] : SVG_MODELS
+  for (const m of modelsToTry) {
+    try {
+      const resp = await fetch(baseUrl + '/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: m,
+          messages: [{ role: 'user', content: SVG_PROMPT_EN }],
+          max_tokens: 16000,
+          stream: false
+        }),
+        signal: AbortSignal.timeout(180000)
+      })
+      if (!resp.ok) {
+        const errBody: any = await resp.json().catch(() => ({}))
+        const errMsg = errBody?.error?.message || ''
+        if (errMsg.includes('not_found') || errMsg.includes('No available channel')) continue
+        return null
+      }
+      const data: any = await resp.json()
+      const content = data.choices?.[0]?.message?.content || ''
+      // Extract SVG from response (may be wrapped in markdown code block)
+      const svgMatch = content.match(/<svg[\s\S]*?<\/svg>/i)
+      if (svgMatch) return svgMatch[0]
+      continue
+    } catch { continue }
+  }
+  return null
 }
 
 app.post('/api/run-iq-test', async (c) => {
@@ -270,15 +279,15 @@ app.post('/api/run-iq-test', async (c) => {
   if (!config) return c.json({ code: -1, message: `未配置 ${provider}/${tier} 分组的API密钥，请先在管理设置中配置` }, 400)
   const cfg = JSON.parse(config.config_json as string)
   
-  // Run candy test + pelican image generation in parallel
-  const [result, imageUrl] = await Promise.all([
+  // Run candy test + pelican SVG generation in parallel
+  const [result, svgCode] = await Promise.all([
     runCandyTest(cfg.url, cfg.key, model),
-    generatePelicanImage(cfg.url, cfg.key, tier).catch(() => null)
+    generatePelicanSVG(cfg.url, cfg.key, model).catch(() => null)
   ])
   
-  await db.prepare(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`)
-    .bind(provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, imageUrl || '').run()
-  return c.json({ code: 0, data: { ...result, imageUrl } })
+  await db.prepare(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, '', ?, datetime('now'))`)
+    .bind(provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, svgCode || '').run()
+  return c.json({ code: 0, data: { ...result, svgCode } })
 })
 
 // ===== Seed with REAL keys =====

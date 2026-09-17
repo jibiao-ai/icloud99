@@ -247,39 +247,50 @@ async function renderIQTest() {
     <div class="text-[10px] ${cls.textMuted()} mt-1.5"><i class="fas fa-clock mr-1"></i>下次: ${nextRun}</div></div>`;
   }).join('')}</div>`;
 
-  // Grid cards for all test results (like the reference screenshot)
+  // Store SVG data for modal access
+  window.__iqTestSVGs = {};
+
+  // Grid cards for all test results
   if (tests.length === 0) {
     html += `<div class="text-center py-16 fade-in"><div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/20 flex items-center justify-center mx-auto mb-3"><i class="fas fa-bicycle text-2xl text-primary-500"></i></div><p class="${cls.text()} font-semibold">尚无检测记录</p><p class="${cls.textSub()} text-sm mt-1">点击上方按钮开始鹈鹕骑行智力检测</p></div>`;
   } else {
     html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">`;
-    tests.forEach(t => {
-      const hasImg = t.image_url && t.image_url.length > 10;
+    tests.forEach((t, idx) => {
+      const hasSvg = t.svg_code && t.svg_code.length > 50 && t.svg_code.includes('<svg');
+      const hasImg = !hasSvg && t.image_url && t.image_url.length > 10;
+      const hasVisual = hasSvg || hasImg;
       const resultColor = t.result === 'pass' ? 'from-emerald-500 to-emerald-600' : t.result === 'works' ? 'from-amber-500 to-amber-600' : 'from-red-500 to-red-600';
       const resultText = t.result === 'pass' ? '智力通过' : t.result === 'works' ? '可疑作品' : '降智记录';
-      const resultDotColor = t.result === 'pass' ? 'bg-emerald-400' : t.result === 'works' ? 'bg-amber-400' : 'bg-red-400';
-      const resultIcon = t.result === 'pass' ? 'fa-check-circle' : t.result === 'works' ? 'fa-exclamation-circle' : 'fa-times-circle';
       const timeStr = fmtTime(t.tested_at);
       const elapsed = (t.response_time_ms / 1000).toFixed(1);
-      // Generate 12+ character hex account ID from test data
       const accountId = genAccountId(t.id, t.tested_at);
-      // Format date for modal: MM/DD HH:mm:ss
       const modalDate = fmtDateFull(t.tested_at);
-      // Escape data for onclick attribute
-      const escapedModel = (t.model || '').replace(/'/g, "\\'");
-      const escapedTier = (t.tier || '').replace(/'/g, "\\'");
-      const escapedImgUrl = hasImg ? (t.image_url || '').replace(/'/g, "\\'") : '';
-      const escapedAccountId = accountId.replace(/'/g, "\\'");
-      const escapedModalDate = modalDate.replace(/'/g, "\\'");
 
-      html += `<div class="${cls.card()} overflow-hidden fade-in group cursor-pointer" onclick="showPelicanModal('${escapedImgUrl}','${escapedModel}','${escapedTier}','${t.result}','${escapedAccountId}','${escapedModalDate}',${t.response_time_ms || 0},${t.score || 0})">
+      // Store SVG code for modal access (avoid inline onclick with huge SVG data)
+      if (hasSvg) window.__iqTestSVGs[t.id] = t.svg_code;
+
+      // Sanitize SVG for inline card display: remove width/height, ensure viewBox, set 100%
+      let cardSvg = '';
+      if (hasSvg) {
+        cardSvg = t.svg_code
+          .replace(/width\s*=\s*["'][^"']*["']/gi, '')
+          .replace(/height\s*=\s*["'][^"']*["']/gi, '')
+          .replace(/<svg/i, '<svg width="100%" height="100%" style="display:block"');
+      }
+
+      html += `<div class="${cls.card()} overflow-hidden fade-in group cursor-pointer" onclick="showPelicanModal(${t.id})">
         <div class="flex items-center justify-between px-2.5 py-1.5 text-[10px] ${isDark()?'bg-slate-700/50 text-slate-400':'bg-gray-50/80 text-gray-500'} border-b ${isDark()?'border-slate-700/50':'border-gray-100'}">
           <span class="font-mono truncate">账号 ID: ${accountId}</span>
           <span class="ml-1 flex-shrink-0">${timeStr}</span>
         </div>
         <div class="relative aspect-square ${isDark()?'bg-slate-900':'bg-gray-100'} overflow-hidden">
-          ${hasImg ? `<img src="${t.image_url}" alt="鹈鹕骑行" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy">` : `<div class="w-full h-full flex flex-col items-center justify-center gap-2"><i class="fas fa-bicycle text-3xl ${cls.textMuted()}"></i><span class="text-xs ${cls.textMuted()}">无结果图</span></div>`}
+          ${hasSvg
+            ? `<div class="w-full h-full svg-card-container">${cardSvg}</div>`
+            : hasImg
+              ? `<img src="${t.image_url}" alt="鹈鹕骑行" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy">`
+              : `<div class="w-full h-full flex flex-col items-center justify-center gap-2"><i class="fas fa-bicycle text-3xl ${cls.textMuted()}"></i><span class="text-xs ${cls.textMuted()}">无结果图</span></div>`}
           <div class="absolute top-1.5 right-1.5"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white bg-gradient-to-r ${resultColor} shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block"></span>${resultText}</span></div>
-          ${hasImg ? `<div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100"><span class="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-gray-800/80 backdrop-blur-sm flex items-center gap-1.5 shadow-lg"><span>放大动画</span><i class="fas fa-arrow-up-right-from-square text-[10px]"></i></span></div>` : ''}
+          ${hasVisual ? `<div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100"><span class="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-gray-800/80 backdrop-blur-sm flex items-center gap-1.5 shadow-lg"><span>放大动画</span><i class="fas fa-arrow-up-right-from-square text-[10px]"></i></span></div>` : ''}
         </div>
         <div class="px-2.5 py-2 flex items-center justify-between">
           <div class="flex items-center gap-1.5 min-w-0"><span class="font-mono text-[11px] ${cls.text()} truncate">${t.model}</span>${tierBadge(t.tier)}</div>
@@ -289,6 +300,8 @@ async function renderIQTest() {
     });
     html += `</div>`;
   }
+  // Store all tests data for modal reference
+  window.__iqTests = tests;
 
   ct.innerHTML = html;
 }
@@ -316,7 +329,7 @@ window.runIQTestForTier = async function(tier) {
       if (resp.code === 0) {
         const r = resp.data;
         const label = r.result === 'pass' ? '智力通过' : r.result === 'works' ? '可疑作品' : '降智记录';
-        toast(`${model} [${tierLabel(tier)}]: ${label} (${(r.responseTime/1000).toFixed(1)}s)${r.imageUrl ? ' · 已生成骑行图' : ''}`, r.result === 'pass' ? 'success' : r.result === 'works' ? 'warning' : 'error', 6000);
+        toast(`${model} [${tierLabel(tier)}]: ${label} (${(r.responseTime/1000).toFixed(1)}s)${r.svgCode ? ' · 已生成SVG动画' : ''}`, r.result === 'pass' ? 'success' : r.result === 'works' ? 'warning' : 'error', 6000);
       } else { toast(`${model} [${tierLabel(tier)}]: ${resp.message}`, 'error'); }
     } catch (e) { toast(`${model} 测试出错: ${e.message}`, 'error'); }
   }
@@ -482,15 +495,30 @@ window.doChangePassword = async function() {
   } else { toast(resp.message || '修改失败', 'error'); }
 };
 
-// ===== Pelican Animation Preview Modal (matches reference design) =====
-window.showPelicanModal = function(imageUrl, model, tier, result, accountId, dateStr, responseTimeMs, score) {
+// ===== Pelican Animation Preview Modal (SVG + image support) =====
+window.showPelicanModal = function(testId) {
   const d = isDark();
-  const statusText = result === 'pass' ? '智力通过' : result === 'works' ? '可疑作品' : '降智记录';
-  const tierText = tierLabel(tier);
-  const root = document.getElementById('modal-root');
-  const hasImage = imageUrl && imageUrl.length > 10;
-  const elapsed = responseTimeMs ? (responseTimeMs / 1000).toFixed(1) : '-';
+  const tests = window.__iqTests || [];
+  const t = tests.find(x => x.id === testId);
+  if (!t) return;
 
+  const hasSvg = window.__iqTestSVGs && window.__iqTestSVGs[testId];
+  const hasImg = !hasSvg && t.image_url && t.image_url.length > 10;
+  const statusText = t.result === 'pass' ? '智力通过' : t.result === 'works' ? '可疑作品' : '降智记录';
+  const accountId = genAccountId(t.id, t.tested_at);
+  const dateStr = fmtDateFull(t.tested_at);
+  const tierText = tierLabel(t.tier);
+
+  // Prepare SVG for modal display - make it responsive
+  let modalSvg = '';
+  if (hasSvg) {
+    modalSvg = window.__iqTestSVGs[testId]
+      .replace(/width\s*=\s*["'][^"']*["']/gi, '')
+      .replace(/height\s*=\s*["'][^"']*["']/gi, '')
+      .replace(/<svg/i, '<svg width="100%" height="100%" style="display:block"');
+  }
+
+  const root = document.getElementById('modal-root');
   root.innerHTML = `
     <div class="fixed inset-0 bg-black/60 backdrop-blur-md z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
       <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()" style="max-height:90vh;display:flex;flex-direction:column">
@@ -499,26 +527,30 @@ window.showPelicanModal = function(imageUrl, model, tier, result, accountId, dat
           <h3 class="text-base font-semibold ${cls.text()}">鹈鹕骑行 · 动画预览</h3>
           <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times text-sm"></i></button>
         </div>
-        <!-- Image -->
+        <!-- Animation content -->
         <div class="flex-1 overflow-auto">
           <div class="p-4 pb-2">
-            ${hasImage
-              ? `<div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700' : 'border-gray-200'} ${d ? 'bg-slate-900' : 'bg-gray-50'}">
-                  <img src="${imageUrl}" alt="鹈鹕骑行动画" class="w-full h-auto" style="max-height:60vh;object-fit:contain;display:block;margin:0 auto">
+            ${hasSvg
+              ? `<div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'} svg-modal-container" style="min-height:300px">
+                  ${modalSvg}
                 </div>`
-              : `<div class="rounded-xl border ${d ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'} flex flex-col items-center justify-center py-20 gap-3">
-                  <i class="fas fa-bicycle text-5xl ${cls.textMuted()}"></i>
-                  <span class="${cls.textSub()} text-sm">暂无骑行动画</span>
-                </div>`}
+              : hasImg
+                ? `<div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700' : 'border-gray-200'} ${d ? 'bg-slate-900' : 'bg-gray-50'}">
+                    <img src="${t.image_url}" alt="鹈鹕骑行动画" class="w-full h-auto" style="max-height:60vh;object-fit:contain;display:block;margin:0 auto">
+                  </div>`
+                : `<div class="rounded-xl border ${d ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'} flex flex-col items-center justify-center py-20 gap-3">
+                    <i class="fas fa-bicycle text-5xl ${cls.textMuted()}"></i>
+                    <span class="${cls.textSub()} text-sm">暂无骑行动画</span>
+                  </div>`}
           </div>
           <!-- Metadata footer -->
           <div class="px-4 pb-4">
-            <div class="flex items-center justify-center gap-1.5 text-xs ${d ? 'text-slate-500' : 'text-gray-400'} font-mono">
+            <div class="flex items-center justify-center flex-wrap gap-1.5 text-xs ${d ? 'text-slate-500' : 'text-gray-400'} font-mono">
               <span>账号 ID: ${accountId}</span>
               <span class="opacity-50">·</span>
               <span>${dateStr}</span>
               <span class="opacity-50">·</span>
-              <span>${model}</span>
+              <span>${t.model}</span>
               <span class="opacity-50">·</span>
               <span>${tierText.toLowerCase()}</span>
               <span class="opacity-50">·</span>
