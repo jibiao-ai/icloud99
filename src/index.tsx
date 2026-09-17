@@ -35,10 +35,20 @@ async function authMiddleware(c: any, next: any) {
 app.get('/api/health', (c) => c.json({ code: 0, message: 'ok' }))
 
 app.post('/api/login', async (c) => {
+  const db = c.env.DB
   const { username, password } = await c.req.json()
-  if (username === 'admin' && password === 'admin123') {
-    const token = await createToken({ id: 1, username: 'admin' })
-    return c.json({ code: 0, data: { token, user: { id: 1, username: 'admin' } } })
+  // Check against DB first for custom password
+  const user = await db.prepare('SELECT * FROM admin_users WHERE username = ?').bind(username).first()
+  if (user) {
+    // password_hash stores plain text for simplicity in Workers env (no bcrypt)
+    // Support both legacy default and custom passwords
+    const storedPw = user.password_hash as string
+    const isLegacy = storedPw.startsWith('$2a$') && password === 'admin123' && username === 'admin'
+    const isMatch = storedPw === password
+    if (isLegacy || isMatch) {
+      const token = await createToken({ id: user.id, username: user.username as string })
+      return c.json({ code: 0, data: { token, user: { id: user.id, username: user.username } } })
+    }
   }
   return c.json({ code: -1, message: '用户名或密码错误' }, 401)
 })
@@ -122,6 +132,23 @@ app.delete('/api/admin/configs/:id', authMiddleware, async (c) => {
   const id = c.req.param('id')
   await c.env.DB.prepare('DELETE FROM api_configs WHERE id = ?').bind(id).run()
   return c.json({ code: 0, message: '删除成功' })
+})
+
+// ===== Admin: change password =====
+app.post('/api/admin/change-password', authMiddleware, async (c) => {
+  const db = c.env.DB
+  const { currentPassword, newPassword } = await c.req.json()
+  if (!currentPassword || !newPassword) return c.json({ code: -1, message: '请填写完整信息' }, 400)
+  if (newPassword.length < 6) return c.json({ code: -1, message: '新密码至少6位' }, 400)
+  const user: any = c.get('user')
+  const dbUser = await db.prepare('SELECT * FROM admin_users WHERE id = ?').bind(user.id).first()
+  if (!dbUser) return c.json({ code: -1, message: '用户不存在' }, 400)
+  const storedPw = dbUser.password_hash as string
+  const isLegacy = storedPw.startsWith('$2a$') && currentPassword === 'admin123'
+  const isMatch = storedPw === currentPassword
+  if (!isLegacy && !isMatch) return c.json({ code: -1, message: '当前密码错误' }, 400)
+  await db.prepare('UPDATE admin_users SET password_hash = ? WHERE id = ?').bind(newPassword, user.id).run()
+  return c.json({ code: 0, message: '密码修改成功！下次登录请使用新密码。' })
 })
 
 // ===== Channel test (uses real keys) =====

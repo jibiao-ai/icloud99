@@ -200,7 +200,7 @@ async function renderIQTest() {
   });
 
   let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹦鹉骑行</h2><p class="${cls.textSub()} text-xs mt-1">Codex Candy Eval · 每3小时轮转检测 Lite → Standard → Ultra</p></div>
+    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-xs mt-1">Codex Candy Eval · 鹈鹕骑行智力测验 · 每3小时轮转检测 Lite → Standard → Ultra</p></div>
     <div class="flex gap-2">
       <button onclick="runIQTestForTier('lite')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Lite</button>
       <button onclick="runIQTestForTier('standard')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Standard</button>
@@ -216,15 +216,37 @@ async function renderIQTest() {
     const latestTest = tierTests[0];
     const nextRun = getNextRunTime(tier);
 
-    // Parrot images from latest tests
-    const images = tierTests.filter(t => t.image_url).slice(0, 3);
+    // Result images from latest tests - ALWAYS show all 3 slots
+    const latestImages = tierTests.slice(0, 3);
 
     html += `<div class="${cls.card()} overflow-hidden fade-in">
       <div class="h-1.5 bg-gradient-to-r ${tierColor(tier)}"></div>
       <div class="p-4">
         <div class="flex items-center justify-between mb-3">${tierBadge(tier)}<span class="text-xl font-bold ${passRate >= 80 ? 'text-emerald-500' : passRate >= 50 ? 'text-amber-500' : 'text-red-500'}">${passRate}%</span></div>
         
-        ${images.length > 0 ? `<div class="flex gap-2 mb-3">${images.map(img => `<div class="flex-1 aspect-square rounded-lg overflow-hidden border ${isDark()?'border-slate-700':'border-gray-200'}"><img src="${img.image_url}" alt="鹦鹉骑行" class="w-full h-full object-cover" onerror="this.style.display='none'"></div>`).join('')}</div>` : `<div class="flex gap-2 mb-3">${[1,2,3].map(()=>`<div class="flex-1 aspect-square rounded-lg ${isDark()?'bg-slate-700':'bg-gray-100'} flex items-center justify-center"><i class="fas fa-bicycle text-2xl ${cls.textMuted()}"></i></div>`).join('')}</div>`}
+        <div class="grid grid-cols-3 gap-2 mb-3">${[0,1,2].map(i => {
+          const t = latestImages[i];
+          if (!t) return `<div class="aspect-square rounded-lg ${isDark()?'bg-slate-700/60':'bg-gray-100'} flex flex-col items-center justify-center gap-1"><i class="fas fa-image text-xl ${cls.textMuted()}"></i><span class="text-[10px] ${cls.textMuted()}">等待检测</span></div>`;
+          const hasImg = t.image_url && t.image_url.length > 5;
+          const statusColor = t.result === 'pass' ? 'border-emerald-500' : t.result === 'works' ? 'border-amber-500' : 'border-red-500';
+          const statusIcon = t.result === 'pass' ? 'fa-check-circle text-emerald-500' : t.result === 'works' ? 'fa-exclamation-circle text-amber-500' : 'fa-times-circle text-red-500';
+          const statusText = t.result === 'pass' ? '通过' : t.result === 'works' ? '可疑' : '降智';
+          if (hasImg) {
+            return `<div class="relative aspect-square rounded-lg overflow-hidden border-2 ${statusColor} group cursor-pointer" onclick="showImageModal('${t.image_url.replace(/'/g, "\\'")}',' ${t.model} [${tierLabel(tier)}]','${statusText}','${t.result}')">
+              <img src="${t.image_url}" alt="鹈鹕骑行结果" class="w-full h-full object-cover transition-transform group-hover:scale-105">
+              <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent p-1.5">
+                <div class="flex items-center gap-1"><i class="fas ${statusIcon} text-[10px]"></i><span class="text-white text-[10px] font-medium">${statusText}</span></div>
+              </div>
+            </div>`;
+          } else {
+            return `<div class="relative aspect-square rounded-lg overflow-hidden border-2 ${statusColor} ${isDark()?'bg-slate-700/60':'bg-gray-100'} flex flex-col items-center justify-center gap-1">
+              <i class="fas ${statusIcon} text-2xl"></i>
+              <span class="text-[10px] font-semibold ${t.result === 'pass' ? 'text-emerald-500' : t.result === 'works' ? 'text-amber-500' : 'text-red-500'}">${statusText}</span>
+              <span class="text-[9px] ${cls.textMuted()}">${t.model}</span>
+              <span class="text-[9px] ${cls.textMuted()}">${fmtTime(t.tested_at)}</span>
+            </div>`;
+          }
+        }).join('')}</div>
 
         <div class="space-y-2 mb-3">
           ${latestTest ? `<div class="flex items-center gap-2 text-xs"><span class="${latestTest.result === 'pass' ? 'text-emerald-500' : latestTest.result === 'works' ? 'text-amber-500' : 'text-red-500'} font-semibold">${latestTest.result === 'pass' ? '✓ 生成完成' : latestTest.result === 'works' ? '◎ 可疑作品' : '✗ 降智记录'}</span></div>
@@ -253,6 +275,7 @@ async function renderIQTest() {
       <th class="px-4 py-3 text-left ${cls.textSub()} font-medium text-xs">分组</th>
       <th class="px-4 py-3 text-left ${cls.textSub()} font-medium text-xs">模型</th>
       <th class="px-4 py-3 text-left ${cls.textSub()} font-medium text-xs">结果</th>
+      <th class="px-4 py-3 text-center ${cls.textSub()} font-medium text-xs">结果图</th>
       <th class="px-4 py-3 text-right ${cls.textSub()} font-medium text-xs">耗时</th>
       <th class="px-4 py-3 text-right ${cls.textSub()} font-medium text-xs">推理Token</th>
     </tr></thead><tbody class="divide-y ${isDark()?'divide-slate-700':'divide-gray-100'}">
@@ -261,6 +284,7 @@ async function renderIQTest() {
         <td class="px-4 py-3">${tierBadge(t.tier)}</td>
         <td class="px-4 py-3 font-mono text-xs ${cls.text()}">${t.model}</td>
         <td class="px-4 py-3">${resultBadge(t.result)}</td>
+        <td class="px-4 py-3 text-center">${t.image_url && t.image_url.length > 5 ? `<img src="${t.image_url}" alt="结果图" class="w-10 h-10 rounded object-cover inline-block border ${isDark()?'border-slate-600':'border-gray-200'} cursor-pointer hover:scale-110 transition-transform" onclick="showImageModal('${t.image_url.replace(/'/g, "\\\\'")}','${t.model} [${tierLabel(t.tier)}]','${t.result === 'pass' ? '通过' : t.result === 'works' ? '可疑' : '降智'}','${t.result}')">` : `<span class="${cls.textMuted()} text-xs">-</span>`}</td>
         <td class="px-4 py-3 text-right font-mono text-xs ${cls.text()}">${(t.response_time_ms/1000).toFixed(1)}s</td>
         <td class="px-4 py-3 text-right font-mono text-xs ${cls.textSub()}">${t.reasoning_tokens||'-'}</td>
       </tr>`).join('')}
@@ -360,6 +384,24 @@ async function renderAdminSettings() {
     }
     html += `</div></div>`;
   }
+
+  // Password Change Section
+  html += `<div class="mb-8 fade-in"><div class="flex items-center gap-3 mb-4"><div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center"><i class="fas fa-lock text-white text-sm"></i></div><h3 class="text-sm font-semibold ${cls.text()}">安全设置</h3></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-1 bg-gradient-to-r from-primary-500 to-primary-600"></div><div class="p-5">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-key mr-1"></i>当前密码</label>
+          <div class="relative"><input id="pw-current" type="password" placeholder="输入当前密码" class="${cls.input()} w-full pr-9"><button onclick="togglePw('pw-current')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()}"><i class="fas fa-eye text-xs"></i></button></div></div>
+        <div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-lock-open mr-1"></i>新密码</label>
+          <div class="relative"><input id="pw-new" type="password" placeholder="至少6位新密码" class="${cls.input()} w-full pr-9"><button onclick="togglePw('pw-new')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()}"><i class="fas fa-eye text-xs"></i></button></div></div>
+        <div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-check-double mr-1"></i>确认新密码</label>
+          <div class="relative"><input id="pw-confirm" type="password" placeholder="再次输入新密码" class="${cls.input()} w-full pr-9"><button onclick="togglePw('pw-confirm')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()}"><i class="fas fa-eye text-xs"></i></button></div></div>
+      </div>
+      <div class="mt-4 flex items-center justify-between">
+        <p class="${cls.textMuted()} text-xs"><i class="fas fa-info-circle mr-1"></i>修改密码后需要重新登录</p>
+        <button onclick="doChangePassword()" class="${cls.btn()} text-xs"><i class="fas fa-save mr-1"></i>修改密码</button>
+      </div>
+    </div></div></div>`;
+
   ct.innerHTML = html;
 }
 
@@ -413,6 +455,63 @@ window.doSeed = async function() {
   else toast(resp.message, 'error');
 };
 
+window.togglePw = function(id) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  const isPassword = input.type === 'password';
+  input.type = isPassword ? 'text' : 'password';
+  const btn = input.parentElement.querySelector('i');
+  if (btn) btn.className = `fas ${isPassword ? 'fa-eye-slash' : 'fa-eye'} text-xs`;
+};
+
+window.doChangePassword = async function() {
+  const current = document.getElementById('pw-current')?.value?.trim();
+  const newPw = document.getElementById('pw-new')?.value?.trim();
+  const confirm = document.getElementById('pw-confirm')?.value?.trim();
+  if (!current || !newPw || !confirm) { toast('请填写所有密码字段', 'warning'); return; }
+  if (newPw.length < 6) { toast('新密码至少需要6位字符', 'warning'); return; }
+  if (newPw !== confirm) { toast('两次输入的新密码不一致', 'warning'); return; }
+  if (current === newPw) { toast('新密码不能与当前密码相同', 'warning'); return; }
+  const resp = await api.post('/admin/change-password', { currentPassword: current, newPassword: newPw });
+  if (resp.code === 0) {
+    toast(resp.message, 'success', 5000);
+    // Clear the fields
+    document.getElementById('pw-current').value = '';
+    document.getElementById('pw-new').value = '';
+    document.getElementById('pw-confirm').value = '';
+  } else { toast(resp.message || '修改失败', 'error'); }
+};
+
+// ===== Image Modal =====
+window.showImageModal = function(imageUrl, modelInfo, statusText, result) {
+  const d = isDark();
+  const statusColor = result === 'pass' ? 'from-emerald-500 to-emerald-600' : result === 'works' ? 'from-amber-500 to-amber-600' : 'from-red-500 to-red-600';
+  const statusIcon = result === 'pass' ? 'fa-check-circle' : result === 'works' ? 'fa-exclamation-circle' : 'fa-times-circle';
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
+      <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800 border border-slate-700' : 'bg-white border-gray-200'}" onclick="event.stopPropagation()">
+        <div class="h-1.5 bg-gradient-to-r ${statusColor}"></div>
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <i class="fas ${statusIcon} text-lg ${result === 'pass' ? 'text-emerald-500' : result === 'works' ? 'text-amber-500' : 'text-red-500'}"></i>
+              <div>
+                <span class="text-sm font-semibold ${cls.text()}">${modelInfo}</span>
+                <span class="ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold text-white bg-gradient-to-r ${statusColor}">${statusText}</span>
+              </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'}"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="rounded-xl overflow-hidden border ${d ? 'border-slate-700' : 'border-gray-200'}">
+            <img src="${imageUrl}" alt="鹈鹕骑行结果" class="w-full h-auto max-h-[60vh] object-contain ${d ? 'bg-slate-900' : 'bg-gray-50'}">
+          </div>
+          <p class="${cls.textMuted()} text-xs mt-2 text-center">智力检测 · 鹈鹕骑行 · AI生成结果图</p>
+        </div>
+      </div>
+    </div>`;
+};
+
 // ===== Tooltip =====
 window.showTooltip = function(event, el) {
   let tip = document.getElementById('bar-tooltip');
@@ -437,7 +536,7 @@ function render() {
     <div class="flex h-screen ${d?'bg-slate-900':'bg-gray-50'}">
       <aside class="${store.sidebarOpen?'w-56':'w-0'} transition-all duration-300 flex-shrink-0 ${d?'bg-slate-800 border-slate-700':'bg-white border-gray-200'} border-r flex flex-col overflow-hidden" style="min-width:${store.sidebarOpen?'14rem':'0'}">
         <div class="p-4 flex items-center gap-3 border-b ${d?'border-slate-700':'border-gray-200'}">
-          <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center flex-shrink-0 shadow-lg"><i class="fas fa-bolt text-white"></i></div>
+          <div class="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 shadow-lg"><img src="/static/logo.png" alt="元擎智算" class="w-full h-full object-cover"></div>
           <div class="overflow-hidden"><h1 class="text-sm font-bold ${cls.text()} whitespace-nowrap">元擎智算</h1><p class="${cls.textMuted()} text-[10px] whitespace-nowrap">AI Monitoring Platform</p></div>
         </div>
         <nav class="flex-1 p-2.5 space-y-1 overflow-y-auto scrollbar-thin">
