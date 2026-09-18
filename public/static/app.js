@@ -7,7 +7,7 @@ const store = {
   sidebarOpen: window.innerWidth > 768,
   iqPage: 1,
   iqTotalPages: 1,
-  chProvider: 'openai',
+  chProvider: 'anthropic',
   chPage: 1,
   chTotalPages: 1,
   chChannels: null,
@@ -168,7 +168,7 @@ function requireLogin(actionName) {
 
 // ===== CHANNEL STATUS PAGE =====
 const CH_PAGE_SIZE = 12; // 每页显示渠道数
-const providerInfo = { openai: { label: 'OpenAI', icon: '✦', color: 'text-emerald-500', bgActive: 'from-emerald-500 to-teal-600' }, anthropic: { label: 'Anthropic', icon: '✸', color: 'text-orange-500', bgActive: 'from-orange-500 to-red-500' } };
+const providerInfo = { anthropic: { label: 'Anthropic', icon: '✸', color: 'text-orange-500', bgActive: 'from-orange-500 to-red-500' }, openai: { label: 'OpenAI', icon: '✦', color: 'text-emerald-500', bgActive: 'from-emerald-500 to-teal-600' } };
 
 async function renderChannelStatus() {
   const ct = document.getElementById('page-content');
@@ -198,8 +198,7 @@ function renderChannelStatusContent(channels) {
   const sColor = status === 'OPERATIONAL' ? 'text-emerald-500 bg-emerald-500/10' : status === 'DEGRADED' ? 'text-amber-500 bg-amber-500/10' : 'text-red-500 bg-red-500/10';
 
   const loggedIn = isLoggedIn();
-  const testBtnClass = loggedIn ? cls.btn() : cls.btnDisabled();
-  const testBtnAction = loggedIn ? 'onclick="runChannelTests()"' : 'onclick="requireLogin(\'检测\')"';
+  const isTestRunning = !!immediateTestTimer;
 
   // Provider channels
   const provChannels = channels.filter(c => c.provider === prov);
@@ -226,18 +225,22 @@ function renderChannelStatusContent(channels) {
   let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
     <div class="flex items-center gap-3"><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-satellite-dish mr-2 text-primary-500"></i>渠道状态</h2><span class="${sColor} px-3 py-1 rounded-full text-xs font-bold">${status}</span></div>
     <div class="flex items-center gap-2">
-      <button ${testBtnAction} class="${testBtnClass} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测${!loggedIn ? ' 🔒' : ''}</button>
+      ${isTestRunning
+        ? `<button onclick="stopChannelTests()" class="px-4 py-2 rounded-lg text-xs font-medium text-white bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 shadow-sm"><i class="fas fa-stop mr-1"></i>停止检测 (${immediateTestCount}/${immediateTestTotal})</button>`
+        : loggedIn
+          ? `<button onclick="runChannelTests()" class="${cls.btn()} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测 (60轮)</button>`
+          : `<button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测 🔒</button>`}
       <button onclick="store.chChannels=null;renderChannelStatus()" class="px-3 py-2 rounded-lg text-xs ${d ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"><i class="fas fa-sync-alt"></i></button>
       <span class="${cls.textMuted()} text-xs"><i class="fas fa-clock mr-1"></i>每小时自动检测</span>
     </div></div>`;
 
-  // Provider tabs
+  // Provider tabs (Anthropic first)
   html += `<div class="flex items-center gap-3 mb-6">
-    <button onclick="switchChProvider('openai')" class="${tabCls('openai')}">
-      <span class="mr-1.5">${providerInfo.openai.icon}</span>OpenAI<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='openai'?'bg-white/20 text-white':'opacity-60'}">${openaiCount}</span>
-    </button>
     <button onclick="switchChProvider('anthropic')" class="${tabCls('anthropic')}">
       <span class="mr-1.5">${providerInfo.anthropic.icon}</span>Anthropic<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='anthropic'?'bg-white/20 text-white':'opacity-60'}">${anthropicCount}</span>
+    </button>
+    <button onclick="switchChProvider('openai')" class="${tabCls('openai')}">
+      <span class="mr-1.5">${providerInfo.openai.icon}</span>OpenAI<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='openai'?'bg-white/20 text-white':'opacity-60'}">${openaiCount}</span>
     </button>
   </div>`;
 
@@ -433,13 +436,58 @@ window.showChannelDetail = async function(channelId) {
   }
 };
 
+// ===== Immediate Test: run 60 rounds, 1 per minute =====
+let immediateTestTimer = null;
+let immediateTestCount = 0;
+let immediateTestTotal = 60;
+
 window.runChannelTests = async function() {
   if (!requireLogin('检测')) return;
-  toast('正在检测所有渠道...', 'info', 5000);
-  const resp = await api.post('/test-channels', {});
-  if (resp.code === 0) { toast(`检测完成！共 ${resp.data.length} 个渠道`, 'success'); store.chChannels = null; renderChannelStatus(); }
-  else toast(resp.message, 'error');
+  // If already running, show status
+  if (immediateTestTimer) {
+    toast(`检测进行中... 已完成 ${immediateTestCount}/${immediateTestTotal} 轮`, 'info');
+    return;
+  }
+  // Start 60-round test
+  immediateTestCount = 0;
+  toast('🚀 开始60轮渠道检测（每分钟1次）...', 'info', 5000);
+  await doOneRoundTest();
+  immediateTestTimer = setInterval(async () => {
+    if (immediateTestCount >= immediateTestTotal) {
+      clearInterval(immediateTestTimer);
+      immediateTestTimer = null;
+      toast(`✅ 60轮检测全部完成！`, 'success', 5000);
+      return;
+    }
+    await doOneRoundTest();
+  }, 60000); // 1 minute interval
 };
+
+window.stopChannelTests = function() {
+  if (immediateTestTimer) {
+    clearInterval(immediateTestTimer);
+    immediateTestTimer = null;
+    toast(`检测已停止，已完成 ${immediateTestCount}/${immediateTestTotal} 轮`, 'warning');
+    // Re-render to update button state
+    if (store.chChannels) renderChannelStatusContent(store.chChannels);
+  }
+};
+
+async function doOneRoundTest() {
+  immediateTestCount++;
+  try {
+    const resp = await api.post('/test-channels', {});
+    if (resp.code === 0) {
+      toast(`第 ${immediateTestCount}/${immediateTestTotal} 轮检测完成 (${resp.data.length} 渠道)`, 'success', 3000);
+      store.chChannels = null;
+      renderChannelStatus();
+    } else {
+      toast(`第 ${immediateTestCount} 轮检测失败: ${resp.message}`, 'error');
+    }
+  } catch (e) {
+    toast(`第 ${immediateTestCount} 轮检测出错: ${e.message}`, 'error');
+  }
+}
 
 // ===== IQ RADAR PAGE =====
 function renderIQRadar() {
@@ -663,11 +711,62 @@ window.runIQTestForTier = async function(tier) {
 };
 
 // ===== ADMIN SETTINGS PAGE =====
+const adminStore = {
+  configTab: 'openai', // 'openai' | 'anthropic'
+  settingsTab: 'config', // 'config' | 'audit' | 'security'
+  auditPage: 1,
+  auditTotalPages: 1,
+  auditFilter: '',
+};
+
 async function renderAdminSettings() {
   const ct = document.getElementById('page-content');
   if (!store.token) { ct.innerHTML = renderLoginForm(); return; }
 
   ct.innerHTML = `<div class="flex items-center justify-center h-64"><div class="w-10 h-10 border-3 border-primary-500 border-t-transparent rounded-full animate-spin"></div></div>`;
+
+  const d = isDark();
+  const stab = adminStore.settingsTab;
+
+  // Settings section tabs
+  const sTabCls = (t) => {
+    if (t === stab) return `px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-sm transition-all`;
+    return `px-4 py-2 rounded-lg text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} transition-all cursor-pointer`;
+  };
+
+  let html = `<div class="flex items-center justify-between mb-6">
+    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-cog mr-2 text-primary-500"></i>管理设置</h2><p class="${cls.textSub()} text-xs mt-1">API密钥配置、审计日志、安全设置</p></div>
+    <div class="flex gap-2">
+      <button onclick="doInitSeed()" class="${cls.btnSec()} text-xs"><i class="fas fa-database mr-1"></i>初始化数据</button>
+      <button onclick="store.logout()" class="${cls.btnSec()} text-xs"><i class="fas fa-sign-out-alt mr-1"></i>退出</button>
+    </div></div>`;
+
+  // Section tabs
+  html += `<div class="flex items-center gap-2 mb-6">
+    <button onclick="switchSettingsTab('config')" class="${sTabCls('config')}"><i class="fas fa-key mr-1.5"></i>API 密钥</button>
+    <button onclick="switchSettingsTab('audit')" class="${sTabCls('audit')}"><i class="fas fa-clipboard-list mr-1.5"></i>审计日志</button>
+    <button onclick="switchSettingsTab('security')" class="${sTabCls('security')}"><i class="fas fa-shield-alt mr-1.5"></i>安全设置</button>
+  </div>`;
+
+  if (stab === 'config') {
+    html += await renderAdminConfigSection();
+  } else if (stab === 'audit') {
+    html += await renderAdminAuditSection();
+  } else if (stab === 'security') {
+    html += renderAdminSecuritySection();
+  }
+
+  ct.innerHTML = html;
+}
+
+window.switchSettingsTab = function(tab) {
+  adminStore.settingsTab = tab;
+  if (tab === 'audit') adminStore.auditPage = 1;
+  renderAdminSettings();
+};
+
+async function renderAdminConfigSection() {
+  const d = isDark();
   const { data: configs } = await api.get('/admin/configs');
 
   const providers = ['openai', 'anthropic'];
@@ -679,54 +778,217 @@ async function renderAdminSettings() {
   const configMap = {};
   (configs || []).forEach(c => { configMap[`${c.provider}_${c.tier}`] = c; });
 
-  let html = `<div class="flex items-center justify-between mb-6">
-    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-key mr-2 text-primary-500"></i>API 密钥管理</h2><p class="${cls.textSub()} text-xs mt-1">配置各 Provider 各分组的 New API 令牌密钥</p></div>
-    <div class="flex gap-2">
-      <button onclick="doInitSeed()" class="${cls.btnSec()} text-xs"><i class="fas fa-database mr-1"></i>初始化数据</button>
-      <button onclick="store.logout()" class="${cls.btnSec()} text-xs"><i class="fas fa-sign-out-alt mr-1"></i>退出</button>
-    </div></div>`;
+  const ctab = adminStore.configTab;
 
-  for (const provider of providers) {
-    html += `<div class="mb-8 fade-in"><div class="flex items-center gap-3 mb-4"><div class="w-8 h-8 rounded-lg bg-gradient-to-br ${providerColors[provider]} flex items-center justify-center"><i class="fas ${providerIcons[provider]} text-white text-sm"></i></div><h3 class="text-sm font-semibold ${cls.text()}">${providerLabels[provider]}</h3></div>
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">`;
+  // Provider tab styles
+  const ptabCls = (p) => {
+    const active = p === ctab;
+    const info = { openai: { bgActive: 'from-emerald-500 to-teal-600' }, anthropic: { bgActive: 'from-orange-500 to-red-500' } };
+    if (active) return `px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r ${info[p].bgActive} shadow-md cursor-default transition-all`;
+    return `px-5 py-2.5 rounded-xl text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} cursor-pointer transition-all`;
+  };
 
-    for (const tier of tiers) {
-      const key = `${provider}_${tier}`;
-      const existing = configMap[key];
-      let existingKey = '', existingUrl = '';
-      if (existing) {
-        try { const j = JSON.parse(existing.config_json); existingKey = j.key || ''; existingUrl = j.url || ''; } catch {}
-      }
+  let html = `<div class="fade-in">`;
 
-      html += `<div class="${cls.card()} overflow-hidden">
-        <div class="h-1 bg-gradient-to-r ${tierColor(tier)}"></div>
-        <div class="p-4">
-          <div class="flex items-center justify-between mb-3">
-            ${tierBadge(tier)}
-            ${existing ? `<span class="flex items-center gap-1 text-xs ${isDark()?'text-emerald-400':'text-emerald-600'}"><i class="fas fa-check-circle"></i>已配置</span>` : `<span class="text-xs ${cls.textMuted()}"><i class="fas fa-circle-xmark mr-1"></i>未配置</span>`}
-          </div>
-          <div class="space-y-2">
-            <div>
-              <label class="text-xs ${cls.textSub()} mb-1 block font-medium">API URL</label>
-              <input id="url_${key}" type="text" value="${existingUrl}" placeholder="https://api.icloud99.cn" class="${cls.input()} w-full text-xs">
-            </div>
-            <div>
-              <label class="text-xs ${cls.textSub()} mb-1 block font-medium">API Key</label>
-              <input id="key_${key}" type="password" value="${existingKey}" placeholder="sk-xxxxxxxxxx" class="${cls.input()} w-full text-xs font-mono">
-            </div>
-          </div>
-          <div class="flex gap-2 mt-3">
-            <button onclick="saveConfig('${provider}','${tier}')" class="${cls.btn()} text-xs flex-1 !py-2"><i class="fas fa-save mr-1"></i>保存</button>
-            ${existing ? `<button onclick="confirmDeleteConfig(${existing.id},'${providerLabels[provider]} ${tierLabel(tier)}')" class="px-3 py-2 rounded-lg text-xs text-red-500 border ${isDark()?'border-slate-600 hover:bg-red-900/20':'border-gray-300 hover:bg-red-50'}"><i class="fas fa-trash"></i></button>` : ''}
-          </div>
-        </div></div>`;
+  // Provider tab switcher (OpenAI / Anthropic in one row)
+  html += `<div class="flex items-center justify-between mb-5">
+    <div class="flex items-center gap-3">
+      <button onclick="switchConfigProvider('openai')" class="${ptabCls('openai')}">
+        <i class="fas fa-bolt mr-1.5"></i>OpenAI
+      </button>
+      <button onclick="switchConfigProvider('anthropic')" class="${ptabCls('anthropic')}">
+        <i class="fas fa-star mr-1.5"></i>Anthropic
+      </button>
+    </div>
+    <button onclick="batchSaveAllConfigs()" class="${cls.btn()} text-xs"><i class="fas fa-save mr-1"></i>一键保存全部</button>
+  </div>`;
+
+  // Tier cards for current provider
+  const provider = ctab;
+  html += `<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">`;
+
+  for (const tier of tiers) {
+    const key = `${provider}_${tier}`;
+    const existing = configMap[key];
+    let existingKey = '', existingUrl = '';
+    if (existing) {
+      try { const j = JSON.parse(existing.config_json); existingKey = j.key || ''; existingUrl = j.url || ''; } catch {}
     }
-    html += `</div></div>`;
+
+    html += `<div class="${cls.card()} overflow-hidden">
+      <div class="h-1 bg-gradient-to-r ${tierColor(tier)}"></div>
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-3">
+          ${tierBadge(tier)}
+          ${existing ? `<span class="flex items-center gap-1 text-xs ${d?'text-emerald-400':'text-emerald-600'}"><i class="fas fa-check-circle"></i>已配置</span>` : `<span class="text-xs ${cls.textMuted()}"><i class="fas fa-circle-xmark mr-1"></i>未配置</span>`}
+        </div>
+        <div class="space-y-2">
+          <div>
+            <label class="text-xs ${cls.textSub()} mb-1 block font-medium">API URL</label>
+            <input id="url_${key}" type="text" value="${existingUrl}" placeholder="https://api.icloud99.cn" class="${cls.input()} w-full text-xs">
+          </div>
+          <div>
+            <label class="text-xs ${cls.textSub()} mb-1 block font-medium">API Key</label>
+            <input id="key_${key}" type="password" value="${existingKey}" placeholder="sk-xxxxxxxxxx" class="${cls.input()} w-full text-xs font-mono">
+          </div>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button onclick="saveConfig('${provider}','${tier}')" class="${cls.btn()} text-xs flex-1 !py-2"><i class="fas fa-save mr-1"></i>保存</button>
+          ${existing ? `<button onclick="confirmDeleteConfig(${existing.id},'${providerLabels[provider]} ${tierLabel(tier)}')" class="px-3 py-2 rounded-lg text-xs text-red-500 border ${d?'border-slate-600 hover:bg-red-900/20':'border-gray-300 hover:bg-red-50'}"><i class="fas fa-trash"></i></button>` : ''}
+        </div>
+      </div></div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
+window.switchConfigProvider = function(prov) {
+  adminStore.configTab = prov;
+  renderAdminSettings();
+};
+
+window.batchSaveAllConfigs = async function() {
+  const provider = adminStore.configTab;
+  const tiers = ['lite', 'standard', 'ultra'];
+  const configs = [];
+
+  for (const tier of tiers) {
+    const key = `${provider}_${tier}`;
+    const urlVal = document.getElementById(`url_${key}`)?.value?.trim();
+    const keyVal = document.getElementById(`key_${key}`)?.value?.trim();
+    if (urlVal && keyVal) {
+      configs.push({ provider, tier, url: urlVal, key: keyVal });
+    }
   }
 
-  // Password Change Section
-  html += `<div class="mb-8 fade-in"><div class="flex items-center gap-3 mb-4"><div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center"><i class="fas fa-lock text-white text-sm"></i></div><h3 class="text-sm font-semibold ${cls.text()}">安全设置</h3></div>
+  if (configs.length === 0) {
+    toast('没有需要保存的配置（请至少填写一个分组的 URL 和 Key）', 'warning');
+    return;
+  }
+
+  const resp = await api.post('/admin/configs/batch', { configs });
+  if (resp.code === 0) {
+    toast(resp.message, 'success');
+    renderAdminSettings();
+  } else {
+    toast(resp.message || '保存失败', 'error');
+  }
+};
+
+async function renderAdminAuditSection() {
+  const d = isDark();
+  const page = adminStore.auditPage || 1;
+  const filter = adminStore.auditFilter || '';
+
+  let url = `/admin/audit-logs?page=${page}&pageSize=12`;
+  if (filter) url += `&action=${encodeURIComponent(filter)}`;
+
+  const resp = await api.get(url);
+  const data = resp.data || {};
+  const logs = data.list || [];
+  const total = data.total || 0;
+  const totalPages = data.totalPages || 1;
+  const actions = data.actions || [];
+  adminStore.auditTotalPages = totalPages;
+
+  const actionLabels = {
+    login: '登录', login_failed: '登录失败', config_save: '保存配置', config_batch_save: '批量保存配置',
+    config_delete: '删除配置', channel_test: '渠道检测', auto_test: '自动检测', auto_test_error: '自动检测错误',
+    iq_test: '智力检测', token_query: '用量查询'
+  };
+  const actionColors = {
+    login: 'text-emerald-500 bg-emerald-500/10', login_failed: 'text-red-500 bg-red-500/10',
+    config_save: 'text-blue-500 bg-blue-500/10', config_batch_save: 'text-blue-500 bg-blue-500/10',
+    config_delete: 'text-red-500 bg-red-500/10', channel_test: 'text-purple-500 bg-purple-500/10',
+    auto_test: 'text-cyan-500 bg-cyan-500/10', auto_test_error: 'text-red-500 bg-red-500/10',
+    iq_test: 'text-amber-500 bg-amber-500/10', token_query: 'text-primary-500 bg-primary-500/10'
+  };
+
+  let html = `<div class="fade-in">`;
+
+  // Filter bar
+  html += `<div class="${cls.card()} p-3 mb-4">
+    <div class="flex items-center gap-3 flex-wrap">
+      <div class="flex items-center gap-2">
+        <span class="${cls.textMuted()} text-xs"><i class="fas fa-filter mr-1"></i>操作类型</span>
+        <select onchange="filterAuditLogs(this.value)" class="${cls.input()} !py-1.5 text-xs !pr-8 min-w-[140px]">
+          <option value="">全部</option>
+          ${actions.map(a => `<option value="${a}" ${a === filter ? 'selected' : ''}>${actionLabels[a] || a}</option>`).join('')}
+        </select>
+      </div>
+      <span class="${cls.textMuted()} text-xs ml-auto">共 ${total} 条记录</span>
+    </div>
+  </div>`;
+
+  // Logs table
+  html += `<div class="${cls.card()} overflow-hidden">
+    <div class="overflow-x-auto scrollbar-thin">
+      <table class="w-full text-sm">
+        <thead><tr class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} text-left">
+          <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()} whitespace-nowrap">时间</th>
+          <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()} whitespace-nowrap">操作</th>
+          <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()} whitespace-nowrap">用户</th>
+          <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()} whitespace-nowrap">详情</th>
+          <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()} whitespace-nowrap">IP</th>
+        </tr></thead>
+        <tbody>`;
+
+  if (logs.length === 0) {
+    html += `<tr><td colspan="5" class="px-4 py-12 text-center ${cls.textMuted()} text-sm"><i class="fas fa-inbox text-2xl mb-2 block"></i>暂无审计日志</td></tr>`;
+  } else {
+    logs.forEach((log, idx) => {
+      const rowBg = idx % 2 === 0 ? '' : (d ? 'bg-slate-800/30' : 'bg-gray-50/50');
+      const timeStr = log.created_at ? new Date(log.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
+      const actionLabel = actionLabels[log.action] || log.action;
+      const actionColor = actionColors[log.action] || `${cls.textSub()} ${d ? 'bg-slate-700' : 'bg-gray-100'}`;
+
+      html += `<tr class="${rowBg} hover:${d ? 'bg-slate-700/40' : 'bg-primary-50/30'} transition-colors">
+        <td class="px-4 py-2.5 text-xs font-mono ${cls.textSub()} whitespace-nowrap">${timeStr}</td>
+        <td class="px-4 py-2.5"><span class="px-2 py-1 rounded-full text-[11px] font-medium ${actionColor}">${actionLabel}</span></td>
+        <td class="px-4 py-2.5 text-xs ${cls.text()}">${log.username || '-'}</td>
+        <td class="px-4 py-2.5 text-xs ${cls.text()} max-w-xs truncate" title="${(log.detail || '').replace(/"/g, '&quot;')}">${log.detail || '-'}</td>
+        <td class="px-4 py-2.5 text-xs font-mono ${cls.textMuted()}">${log.ip || '-'}</td>
+      </tr>`;
+    });
+  }
+  html += `</tbody></table></div>`;
+
+  // Pagination (using same style as IQ test)
+  if (totalPages > 1) {
+    html += renderGenericPagination(page, totalPages, total, 'goAuditPage', 'audit-page-jump', 'jumpAuditPage', d);
+  }
+
+  html += `</div></div>`;
+  return html;
+}
+
+window.filterAuditLogs = function(action) {
+  adminStore.auditFilter = action;
+  adminStore.auditPage = 1;
+  renderAdminSettings();
+};
+
+window.goAuditPage = function(p) {
+  if (p < 1) p = 1;
+  if (p > adminStore.auditTotalPages) p = adminStore.auditTotalPages;
+  adminStore.auditPage = p;
+  renderAdminSettings();
+};
+
+window.jumpAuditPage = function() {
+  const input = document.getElementById('audit-page-jump');
+  if (!input) return;
+  let p = parseInt(input.value);
+  if (isNaN(p) || p < 1) p = 1;
+  if (p > adminStore.auditTotalPages) p = adminStore.auditTotalPages;
+  goAuditPage(p);
+};
+
+function renderAdminSecuritySection() {
+  const d = isDark();
+  let html = `<div class="fade-in">
     <div class="${cls.card()} overflow-hidden"><div class="h-1 bg-gradient-to-r from-primary-500 to-primary-600"></div><div class="p-5">
+      <h3 class="text-sm font-semibold ${cls.text()} mb-4"><i class="fas fa-lock mr-2"></i>修改密码</h3>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-key mr-1"></i>当前密码</label>
           <div class="relative"><input id="pw-current" type="password" placeholder="输入当前密码" class="${cls.input()} w-full pr-9"><button onclick="togglePw('pw-current')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()}"><i class="fas fa-eye text-xs"></i></button></div></div>
@@ -739,9 +1001,9 @@ async function renderAdminSettings() {
         <p class="${cls.textMuted()} text-xs"><i class="fas fa-info-circle mr-1"></i>修改密码后需要重新登录</p>
         <button onclick="doChangePassword()" class="${cls.btn()} text-xs"><i class="fas fa-save mr-1"></i>修改密码</button>
       </div>
-    </div></div></div>`;
-
-  ct.innerHTML = html;
+    </div></div>
+  </div>`;
+  return html;
 }
 
 function renderLoginForm() {
@@ -1656,5 +1918,18 @@ function render() {
   }
 }
 
-setInterval(() => { if (store.currentPage === 'channel-status') { store.chChannels = null; renderChannelStatus(); } }, 60 * 60 * 1000);
+// Hourly auto-test: call backend API to actually run tests, then refresh UI
+setInterval(async () => {
+  try {
+    console.log('[AutoTest] Running hourly frontend-triggered channel test...');
+    await api.post('/test-channels', {});
+    console.log('[AutoTest] Hourly test completed');
+    if (store.currentPage === 'channel-status') {
+      store.chChannels = null;
+      renderChannelStatus();
+    }
+  } catch (e) {
+    console.error('[AutoTest] Error:', e);
+  }
+}, 60 * 60 * 1000);
 render();

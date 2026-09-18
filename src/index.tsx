@@ -68,6 +68,30 @@ async function authMiddleware(c: any, next: any) {
   await next()
 }
 
+// ===== Audit Log Helper =====
+async function logAudit(action: string, detail: string, ip: string = '', user: string = 'system') {
+  try {
+    await run('INSERT INTO audit_logs (action, detail, ip, username, created_at) VALUES (?, ?, ?, ?, NOW())', [action, detail.substring(0, 2000), ip, user]);
+  } catch (e: any) { console.error('Audit log error:', e.message); }
+}
+
+// ===== Ensure audit_logs table exists =====
+async function ensureAuditTable() {
+  try {
+    await run(`CREATE TABLE IF NOT EXISTS audit_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      action VARCHAR(100) NOT NULL,
+      detail TEXT,
+      ip VARCHAR(100) DEFAULT '',
+      username VARCHAR(255) DEFAULT 'system',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_action (action),
+      INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  } catch (e: any) { console.error('Create audit_logs table error:', e.message); }
+}
+ensureAuditTable();
+
 // ===== Public =====
 app.get('/api/health', async (c) => {
   try { await query('SELECT 1'); return c.json({ code: 0, message: 'ok' }) }
@@ -76,6 +100,7 @@ app.get('/api/health', async (c) => {
 
 app.post('/api/login', async (c) => {
   const { username, password } = await c.req.json()
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
   const user = await queryOne('SELECT * FROM admin_users WHERE username = ?', [username])
   if (user) {
     const storedPw = user.password_hash as string
@@ -83,9 +108,11 @@ app.post('/api/login', async (c) => {
     const isMatch = storedPw === password
     if (isLegacy || isMatch) {
       const token = await createToken({ id: user.id, username: user.username })
+      await logAudit('login', `用户 ${username} 登录成功`, ip, username)
       return c.json({ code: 0, data: { token, user: { id: user.id, username: user.username } } })
     }
   }
+  await logAudit('login_failed', `用户 ${username} 登录失败`, ip, username || 'unknown')
   return c.json({ code: -1, message: '用户名或密码错误' }, 401)
 })
 
@@ -150,15 +177,38 @@ app.get('/api/admin/configs', authMiddleware, async (c) => {
 
 app.post('/api/admin/configs', authMiddleware, async (c) => {
   const { provider, tier, key, url } = await c.req.json()
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+  const user: any = c.get('user')
   if (!provider || !tier || !key || !url) return c.json({ code: -1, message: '参数不完整' }, 400)
   const config_json = JSON.stringify({ _type: 'newapi_channel_conn', key, url })
   await run(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), updated_at = NOW()`, [provider, tier, config_json])
+  await logAudit('config_save', `保存配置 ${provider}/${tier}`, ip, user?.username || 'admin')
   return c.json({ code: 0, message: '保存成功' })
+})
+
+// ===== Admin: batch save configs =====
+app.post('/api/admin/configs/batch', authMiddleware, async (c) => {
+  const { configs } = await c.req.json()
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+  const user: any = c.get('user')
+  if (!Array.isArray(configs) || configs.length === 0) return c.json({ code: -1, message: '请提供配置数据' }, 400)
+  let saved = 0
+  for (const cfg of configs) {
+    if (!cfg.provider || !cfg.tier || !cfg.key || !cfg.url) continue
+    const config_json = JSON.stringify({ _type: 'newapi_channel_conn', key: cfg.key, url: cfg.url })
+    await run(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), updated_at = NOW()`, [cfg.provider, cfg.tier, config_json])
+    saved++
+  }
+  await logAudit('config_batch_save', `批量保存 ${saved} 个配置`, ip, user?.username || 'admin')
+  return c.json({ code: 0, message: `成功保存 ${saved} 个配置` })
 })
 
 app.delete('/api/admin/configs/:id', authMiddleware, async (c) => {
   const id = c.req.param('id')
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+  const user: any = c.get('user')
   await run('DELETE FROM api_configs WHERE id = ?', [id])
+  await logAudit('config_delete', `删除配置 ID=${id}`, ip, user?.username || 'admin')
   return c.json({ code: 0, message: '删除成功' })
 })
 
@@ -202,6 +252,7 @@ async function testUpstream(baseUrl: string, apiKey: string, model: string) {
 
 app.post('/api/test-channels', async (c) => {
   const { tier } = await c.req.json().catch(() => ({ tier: '' }))
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
   let channelQuery = 'SELECT * FROM channels WHERE is_active = 1'
   const channelParams: any[] = []
   if (tier) { channelQuery += ' AND tier = ?'; channelParams.push(tier) }
@@ -222,8 +273,47 @@ app.post('/api/test-channels', async (c) => {
       results.push({ channel_id: ch.id, name: ch.name, error: e.message })
     }
   }
+  await logAudit('channel_test', `渠道检测完成，共 ${results.length} 个渠道${tier ? ` (tier=${tier})` : ''}`, ip)
   return c.json({ code: 0, data: results })
 })
+
+// ===== Auto Hourly Channel Test (server-side cron) =====
+let lastAutoTestTime = 0
+const AUTO_TEST_INTERVAL = 60 * 60 * 1000 // 1 hour
+
+async function runAutoChannelTest() {
+  const now = Date.now()
+  if (now - lastAutoTestTime < AUTO_TEST_INTERVAL) return
+  lastAutoTestTime = now
+  console.log('[AutoTest] Running hourly channel test...')
+  try {
+    const channels = await query('SELECT * FROM channels WHERE is_active = 1 ORDER BY provider, sort_order')
+    let tested = 0
+    for (const ch of channels) {
+      const config = await queryOne('SELECT * FROM api_configs WHERE provider = ? AND tier = ?', [ch.provider, ch.tier])
+      if (!config) continue
+      try {
+        const cfg = JSON.parse(config.config_json)
+        const result = await testUpstream(cfg.url, cfg.key, ch.model_id)
+        await run('INSERT INTO channel_tests (channel_id, response_time_ms, ping_ms, success, tested_at) VALUES (?, ?, ?, ?, NOW())', [ch.id, result.responseTime, result.ping, result.success ? 1 : 0])
+        tested++
+      } catch (e: any) {
+        await run('INSERT INTO channel_tests (channel_id, response_time_ms, ping_ms, success, tested_at) VALUES (?, 0, 0, 0, NOW())', [ch.id])
+        tested++
+      }
+    }
+    await logAudit('auto_test', `每小时自动检测完成，共 ${tested} 个渠道`)
+    console.log(`[AutoTest] Completed: ${tested} channels tested`)
+  } catch (e: any) {
+    console.error('[AutoTest] Error:', e.message)
+    await logAudit('auto_test_error', `自动检测失败: ${e.message}`)
+  }
+}
+
+// Start the hourly interval
+setInterval(runAutoChannelTest, AUTO_TEST_INTERVAL)
+// Run once at startup after 30 seconds
+setTimeout(runAutoChannelTest, 30000)
 
 // ===== IQ Test (candy) =====
 const CANDY_PROMPT = `不使用任何外部工具回答以下问题：
@@ -301,6 +391,8 @@ app.post('/api/run-iq-test', async (c) => {
 
   await run(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, '', ?, NOW())`,
     [provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, svgCode || ''])
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+  await logAudit('iq_test', `智力检测 ${model} [${tier}]: ${result.result} (${result.score}分)`, ip)
   return c.json({ code: 0, data: { ...result, svgCode } })
 })
 
@@ -475,6 +567,8 @@ app.post('/api/token-usage/query', async (c) => {
       dailyStats[key] = dailyStatsRaw[key] || { count: 0, quota: 0 }
     }
 
+    const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+    await logAudit('token_query', `查询令牌用量 (${parsedLogs.length}条记录)`, ip)
     return c.json({
       code: 0,
       data: {
@@ -488,6 +582,38 @@ app.post('/api/token-usage/query', async (c) => {
   } catch (e: any) {
     return c.json({ code: -1, message: '查询失败: ' + e.message })
   }
+})
+
+// ===== Audit Logs API =====
+app.get('/api/admin/audit-logs', authMiddleware, async (c) => {
+  const page = parseInt(c.req.query('page') || '1')
+  const pageSize = parseInt(c.req.query('pageSize') || '20')
+  const action = c.req.query('action') || ''
+  
+  let countSql = 'SELECT COUNT(*) as total FROM audit_logs WHERE 1=1'
+  let sql = 'SELECT * FROM audit_logs WHERE 1=1'
+  const params: any[] = []
+  const countParams: any[] = []
+  
+  if (action) {
+    sql += ' AND action = ?'; params.push(action)
+    countSql += ' AND action = ?'; countParams.push(action)
+  }
+  
+  const countResult = await queryOne(countSql, countParams)
+  const total = countResult?.total || 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const offset = (page - 1) * pageSize
+  
+  sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+  params.push(pageSize, offset)
+  
+  const logs = await query(sql, params)
+  
+  // Get distinct actions for filter
+  const actions = await query('SELECT DISTINCT action FROM audit_logs ORDER BY action')
+  
+  return c.json({ code: 0, data: { list: logs, total, page, pageSize, totalPages, actions: actions.map((a: any) => a.action) } })
 })
 
 // ===== Frontend =====

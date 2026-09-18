@@ -61,6 +61,17 @@ CREATE TABLE IF NOT EXISTS iq_tests (
   INDEX idx_model_tier (model, tier)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  action VARCHAR(100) NOT NULL,
+  detail TEXT,
+  ip VARCHAR(100) DEFAULT '',
+  username VARCHAR(255) DEFAULT 'system',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_action (action),
+  INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Default admin user (password: admin123)
 INSERT IGNORE INTO admin_users (username, password_hash)
 VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy');
