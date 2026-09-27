@@ -169,6 +169,23 @@ app.get('/api/iq-tests/stats', async (c) => {
   return c.json({ code: 0, data: stats })
 })
 
+// IQ test schedule info
+app.get('/api/iq-tests/schedule', async (c) => {
+  return c.json({ code: 0, data: {
+    model: IQ_TEST_MODEL,
+    schedule: '每天凌晨 2:00-8:00，每小时轮转',
+    tiers: IQ_TIERS,
+    hours: [
+      { hour: 2, tier: 'lite' },
+      { hour: 3, tier: 'standard' },
+      { hour: 4, tier: 'ultra' },
+      { hour: 5, tier: 'lite' },
+      { hour: 6, tier: 'standard' },
+      { hour: 7, tier: 'ultra' },
+    ]
+  }})
+})
+
 // ===== Admin =====
 app.get('/api/admin/configs', authMiddleware, async (c) => {
   const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
@@ -315,6 +332,71 @@ setInterval(runAutoChannelTest, AUTO_TEST_INTERVAL)
 // Run once at startup after 30 seconds
 setTimeout(runAutoChannelTest, 30000)
 
+// ===== Auto IQ Test Cron (2:00 AM - 8:00 AM, every 1 hour, rotate tiers) =====
+const IQ_TIERS = ['lite', 'standard', 'ultra']
+let lastAutoIQTestHour = -1
+
+async function runAutoIQTest() {
+  const now = new Date()
+  const hour = now.getHours()
+  
+  // Only run between 2:00 AM and 8:00 AM (inclusive of 2, exclusive of 8)
+  if (hour < 2 || hour >= 8) return
+  
+  // Don't run twice in the same hour
+  if (hour === lastAutoIQTestHour) return
+  lastAutoIQTestHour = hour
+  
+  // Determine which tier to test based on hour: 2->lite, 3->standard, 4->ultra, 5->lite, 6->standard, 7->ultra
+  const tierIdx = (hour - 2) % IQ_TIERS.length
+  const tier = IQ_TIERS[tierIdx]
+  const model = IQ_TEST_MODEL // gpt-6-astra only
+  
+  console.log(`[AutoIQ] Running IQ test at ${hour}:00 for tier=${tier} model=${model}`)
+  try {
+    // Get API config from admin settings (api_configs table)
+    const config = await queryOne('SELECT * FROM api_configs WHERE provider = ? AND tier = ?', ['openai', tier])
+    if (!config) {
+      console.log(`[AutoIQ] No API config for openai/${tier}, skipping`)
+      await logAudit('auto_iq_skip', `智力自动检测跳过: openai/${tier} 未配置密钥`)
+      return
+    }
+    const cfg = JSON.parse(config.config_json)
+    
+    // Run candy test and SVG generation in parallel
+    const [candyResult, svgResult] = await Promise.all([
+      runCandyTest(cfg.url, cfg.key, model),
+      generatePelicanSVG(cfg.url, cfg.key, model)
+    ])
+    
+    // Evaluate combined result
+    const hasSvg = !!svgResult.svgCode
+    let finalResult = candyResult.result
+    let finalScore = candyResult.score
+    if (hasSvg && finalResult === 'degraded') { finalResult = 'works'; finalScore = Math.max(finalScore, 50) }
+    if (hasSvg && finalResult === 'pass') { finalScore = 100 }
+    
+    await run(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, '', ?, NOW())`,
+      ['openai', tier, model, finalResult, finalScore, candyResult.rawResponse,
+       candyResult.reasoningTokens + svgResult.reasoningTokens,
+       candyResult.inputTokens + svgResult.inputTokens,
+       candyResult.outputTokens + svgResult.outputTokens,
+       Math.max(candyResult.responseTime, svgResult.responseTime),
+       svgResult.svgCode || ''])
+    
+    await logAudit('auto_iq_test', `智力自动检测 ${model} [${tier}]: ${finalResult} (${finalScore}分)${hasSvg ? ' · SVG生成成功' : ''}`)
+    console.log(`[AutoIQ] Completed: ${model} [${tier}] => ${finalResult} (${finalScore}pts)`)
+  } catch (e: any) {
+    console.error('[AutoIQ] Error:', e.message)
+    await logAudit('auto_iq_error', `智力自动检测失败 [${tier}]: ${e.message}`)
+  }
+}
+
+// Check every 10 minutes for auto IQ test timing
+setInterval(runAutoIQTest, 10 * 60 * 1000)
+// Also check at startup after 60 seconds
+setTimeout(runAutoIQTest, 60000)
+
 // ===== IQ Test (candy) =====
 const CANDY_PROMPT = `不使用任何外部工具回答以下问题：
 
@@ -348,52 +430,73 @@ async function runCandyTest(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { result: 'degraded', score: 0, rawResponse: `Error: ${e.message}`, reasoningTokens: 0, inputTokens: 0, outputTokens: 0, responseTime: Date.now() - startTime } }
 }
 
-const SVG_PROMPT_EN = `创建一个 HTML，内容是 SVG 绘制一个鹈鹕骑自行车的 2D 动画`
+const SVG_PROMPT_EN = `Generate an SVG of a pelican riding a bicycle`
 
-const SVG_MODELS = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5']
+const IQ_TEST_MODEL = 'gpt-6-astra'
 
-async function generatePelicanSVG(baseUrl: string, apiKey: string, model?: string): Promise<string | null> {
-  const modelsToTry = model ? [model, ...SVG_MODELS.filter(m => m !== model)] : SVG_MODELS
-  for (const m of modelsToTry) {
-    try {
-      const resp = await fetch(baseUrl + '/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: m, messages: [{ role: 'user', content: SVG_PROMPT_EN }], max_tokens: 16000, stream: false }),
-        signal: AbortSignal.timeout(180000)
-      })
-      if (!resp.ok) {
-        const errBody: any = await resp.json().catch(() => ({}))
-        const errMsg = errBody?.error?.message || ''
-        if (errMsg.includes('not_found') || errMsg.includes('No available channel')) continue
-        return null
-      }
-      const data: any = await resp.json()
-      const content = data.choices?.[0]?.message?.content || ''
-      const svgMatch = content.match(/<svg[\s\S]*?<\/svg>/i)
-      if (svgMatch) return svgMatch[0]
-      continue
-    } catch { continue }
+async function generatePelicanSVG(baseUrl: string, apiKey: string, model?: string): Promise<{ svgCode: string | null; usedModel: string; inputTokens: number; outputTokens: number; reasoningTokens: number; responseTime: number }> {
+  const useModel = model || IQ_TEST_MODEL
+  const startTime = Date.now()
+  try {
+    const resp = await fetch(baseUrl + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: useModel, messages: [{ role: 'user', content: SVG_PROMPT_EN }], max_tokens: 16000, stream: false }),
+      signal: AbortSignal.timeout(180000)
+    })
+    const responseTime = Date.now() - startTime
+    if (!resp.ok) {
+      return { svgCode: null, usedModel: useModel, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, responseTime }
+    }
+    const data: any = await resp.json()
+    const content = data.choices?.[0]?.message?.content || ''
+    const usage = data.usage || {}
+    const svgMatch = content.match(/<svg[\s\S]*?<\/svg>/i)
+    return {
+      svgCode: svgMatch ? svgMatch[0] : null,
+      usedModel: useModel,
+      inputTokens: usage.prompt_tokens || 0,
+      outputTokens: usage.completion_tokens || 0,
+      reasoningTokens: usage.completion_tokens_details?.reasoning_tokens || 0,
+      responseTime
+    }
+  } catch (e: any) {
+    return { svgCode: null, usedModel: useModel, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, responseTime: Date.now() - startTime }
   }
-  return null
 }
 
 app.post('/api/run-iq-test', async (c) => {
-  const { model, tier, provider } = await c.req.json()
-  const config = await queryOne('SELECT * FROM api_configs WHERE provider = ? AND tier = ?', [provider || 'openai', tier || 'lite'])
-  if (!config) return c.json({ code: -1, message: `未配置 ${provider}/${tier} 分组的API密钥，请先在管理设置中配置` }, 400)
+  const { tier, provider } = await c.req.json()
+  const model = IQ_TEST_MODEL // 只使用 gpt-6-astra
+  const usedProvider = provider || 'openai'
+  const usedTier = tier || 'lite'
+  const config = await queryOne('SELECT * FROM api_configs WHERE provider = ? AND tier = ?', [usedProvider, usedTier])
+  if (!config) return c.json({ code: -1, message: `未配置 ${usedProvider}/${usedTier} 分组的API密钥，请先在管理设置中配置` }, 400)
   const cfg = JSON.parse(config.config_json)
 
-  const [result, svgCode] = await Promise.all([
+  // 并行执行 candy 测试和 pelican SVG 生成
+  const [candyResult, svgResult] = await Promise.all([
     runCandyTest(cfg.url, cfg.key, model),
-    generatePelicanSVG(cfg.url, cfg.key, model).catch(() => null)
+    generatePelicanSVG(cfg.url, cfg.key, model)
   ])
 
+  // 综合评估结果
+  const hasSvg = !!svgResult.svgCode
+  let finalResult = candyResult.result
+  let finalScore = candyResult.score
+  if (hasSvg && finalResult === 'degraded') { finalResult = 'works'; finalScore = Math.max(finalScore, 50) }
+  if (hasSvg && finalResult === 'pass') { finalScore = 100 }
+
   await run(`INSERT INTO iq_tests (provider, tier, model, test_type, result, score, raw_response, reasoning_tokens, input_tokens, output_tokens, response_time_ms, image_url, svg_code, tested_at) VALUES (?, ?, ?, 'pelican', ?, ?, ?, ?, ?, ?, ?, '', ?, NOW())`,
-    [provider || 'openai', tier || 'lite', model, result.result, result.score, result.rawResponse, result.reasoningTokens, result.inputTokens, result.outputTokens, result.responseTime, svgCode || ''])
+    [usedProvider, usedTier, model, finalResult, finalScore, candyResult.rawResponse,
+     candyResult.reasoningTokens + svgResult.reasoningTokens,
+     candyResult.inputTokens + svgResult.inputTokens,
+     candyResult.outputTokens + svgResult.outputTokens,
+     Math.max(candyResult.responseTime, svgResult.responseTime),
+     svgResult.svgCode || ''])
   const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
-  await logAudit('iq_test', `智力检测 ${model} [${tier}]: ${result.result} (${result.score}分)`, ip)
-  return c.json({ code: 0, data: { ...result, svgCode } })
+  await logAudit('iq_test', `智力检测 ${model} [${usedTier}]: ${finalResult} (${finalScore}分)`, ip)
+  return c.json({ code: 0, data: { result: finalResult, score: finalScore, rawResponse: candyResult.rawResponse, responseTime: Math.max(candyResult.responseTime, svgResult.responseTime), svgCode: svgResult.svgCode } })
 })
 
 // ===== Seed =====

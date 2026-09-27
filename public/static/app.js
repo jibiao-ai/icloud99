@@ -132,12 +132,13 @@ function genAccountId(id, testedAt) {
 function fmtDateFull(dateStr) {
   try {
     const d = new Date(dateStr);
+    const yy = String(d.getFullYear()).slice(2);
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     const hh = String(d.getHours()).padStart(2, '0');
     const mi = String(d.getMinutes()).padStart(2, '0');
     const ss = String(d.getSeconds()).padStart(2, '0');
-    return `${mm}/${dd} ${hh}:${mi}:${ss}`;
+    return `${yy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
   } catch { return dateStr || ''; }
 }
 
@@ -530,7 +531,7 @@ async function renderIQTest(page) {
   const loggedIn = isLoggedIn();
 
   let html = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
-    <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-[10px] sm:text-xs mt-1">Candy Eval + Pelican Bicycle · 每3小时轮转</p></div>
+    <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-[10px] sm:text-xs mt-1">Pelican Bicycle SVG + Candy Eval · 每日 02:00-08:00 每小时轮转 · 仅使用 gpt-6-astra</p></div>
     <div class="flex gap-1.5 sm:gap-2">`;
 
   if (loggedIn) {
@@ -542,6 +543,7 @@ async function renderIQTest(page) {
       <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Std 🔒</button>
       <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Ultra 🔒</button>`;
   }
+  html += `<span class="${cls.textMuted()} text-[10px] hidden sm:flex items-center gap-1"><i class="fas fa-microchip"></i>gpt-6-astra</span>`;
   html += `</div></div>`;
 
   // Summary stats bar
@@ -569,7 +571,7 @@ async function renderIQTest(page) {
       const hasVisual = hasSvg || hasImg;
       const resultColor = t.result === 'pass' ? 'from-emerald-500 to-emerald-600' : t.result === 'works' ? 'from-amber-500 to-amber-600' : 'from-red-500 to-red-600';
       const resultText = t.result === 'pass' ? '智力通过' : t.result === 'works' ? '可疑作品' : '降智记录';
-      const timeStr = fmtTime(t.tested_at);
+      const dateTimeStr = fmtDateFull(t.tested_at);
       const elapsed = (t.response_time_ms / 1000).toFixed(1);
       const accountId = genAccountId(t.id, t.tested_at);
 
@@ -579,8 +581,8 @@ async function renderIQTest(page) {
 
       html += `<div class="${cls.card()} overflow-hidden fade-in group cursor-pointer" onclick="showPelicanModal(${t.id})">
         <div class="flex items-center justify-between px-2.5 py-1.5 text-[10px] ${isDark()?'bg-slate-700/50 text-slate-400':'bg-gray-50/80 text-gray-500'} border-b ${isDark()?'border-slate-700/50':'border-gray-100'}">
-          <span class="font-mono truncate">账号 ID: ${accountId}</span>
-          <span class="ml-1 flex-shrink-0">${timeStr}</span>
+          <span class="font-mono truncate"><i class="fas fa-calendar-alt mr-1 opacity-60"></i>${dateTimeStr}</span>
+          <span class="ml-1 flex-shrink-0">${tierBadge(t.tier)}</span>
         </div>
         <div class="relative ${isDark()?'bg-slate-900':'bg-gray-100'} overflow-hidden" style="aspect-ratio:${hasSvg ? '8/5' : '1/1'}">
           ${hasSvg
@@ -591,9 +593,15 @@ async function renderIQTest(page) {
           <div class="absolute top-1.5 right-1.5"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white bg-gradient-to-r ${resultColor} shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block"></span>${resultText}</span></div>
           ${hasVisual ? `<div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100"><span class="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-gray-800/80 backdrop-blur-sm flex items-center gap-1.5 shadow-lg"><span>放大动画</span><i class="fas fa-arrow-up-right-from-square text-[10px]"></i></span></div>` : ''}
         </div>
-        <div class="px-2.5 py-2 flex items-center justify-between">
-          <div class="flex items-center gap-1.5 min-w-0"><span class="font-mono text-[11px] ${cls.text()} truncate">${t.model}</span>${tierBadge(t.tier)}</div>
-          <span class="font-mono text-[11px] ${cls.textSub()} flex-shrink-0 ml-1">${elapsed} 秒</span>
+        <div class="px-2.5 py-2">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-[11px] ${cls.text()} truncate">${t.model}</span>
+            <span class="font-mono text-[11px] ${cls.textSub()} flex-shrink-0 ml-1">${elapsed}s</span>
+          </div>
+          <div class="flex items-center justify-between mt-0.5">
+            <span class="font-mono text-[10px] ${cls.textMuted()} truncate">ID: ${accountId}</span>
+            <span class="text-[10px] ${cls.textMuted()}">${timeAgo(t.tested_at)}</span>
+          </div>
         </div>
       </div>`;
     });
@@ -629,33 +637,54 @@ window.jumpIQPage = function() {
 };
 
 function getNextRunTime(tier) {
+  // IQ test schedule: 2:00-8:00 AM, rotate tiers every hour
+  // Hour 2->lite, 3->standard, 4->ultra, 5->lite, 6->standard, 7->ultra
   const tiers = ['lite', 'standard', 'ultra'];
+  const tierIdx = tiers.indexOf(tier);
   const now = new Date();
   const h = now.getHours();
-  const idx = tiers.indexOf(tier);
-  const nextH = Math.ceil((h + 1) / 3) * 3 + idx;
-  const next = new Date(now); next.setHours(nextH > 23 ? nextH - 24 : nextH, 0, 0, 0);
-  if (next <= now) next.setHours(next.getHours() + 3);
-  const diff = next - now;
-  const mins = Math.floor(diff / 60000);
-  const secs = Math.floor((diff % 60000) / 1000);
-  return `${next.toTimeString().substring(0, 5)} · ${mins}分${secs}秒后`;
+  const m = now.getMinutes();
+  
+  // Schedule hours for each tier:
+  // lite: 2, 5  |  standard: 3, 6  |  ultra: 4, 7
+  const scheduleHours = [2, 3, 4, 5, 6, 7];
+  const tierHours = scheduleHours.filter(sh => (sh - 2) % 3 === tierIdx);
+  
+  let nextRun = null;
+  for (const sh of tierHours) {
+    if (sh > h || (sh === h && m < 1)) {
+      nextRun = new Date(now);
+      nextRun.setHours(sh, 0, 0, 0);
+      break;
+    }
+  }
+  
+  // If no run today left, next is tomorrow
+  if (!nextRun) {
+    nextRun = new Date(now);
+    nextRun.setDate(nextRun.getDate() + 1);
+    nextRun.setHours(tierHours[0], 0, 0, 0);
+  }
+  
+  const diff = nextRun - now;
+  if (diff < 0) return '已完成';
+  const hours = Math.floor(diff / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  if (hours > 0) return `${nextRun.toTimeString().substring(0, 5)} · ${hours}小时${mins}分后`;
+  return `${nextRun.toTimeString().substring(0, 5)} · ${mins}分后`;
 }
 
 window.runIQTestForTier = async function(tier) {
   if (!requireLogin('检测')) return;
-  toast(`正在为 ${tierLabel(tier)} 分组运行鹈鹕骑行检测...`, 'info', 10000);
-  const models = ['gpt-5.6-sol', 'gpt-6-astra'];
-  for (const model of models) {
-    try {
-      const resp = await api.post('/run-iq-test', { model, tier, provider: 'openai' });
-      if (resp.code === 0) {
-        const r = resp.data;
-        const label = r.result === 'pass' ? '智力通过' : r.result === 'works' ? '可疑作品' : '降智记录';
-        toast(`${model} [${tierLabel(tier)}]: ${label} (${(r.responseTime/1000).toFixed(1)}s)${r.svgCode ? ' · 已生成SVG动画' : ''}`, r.result === 'pass' ? 'success' : r.result === 'works' ? 'warning' : 'error', 6000);
-      } else { toast(`${model} [${tierLabel(tier)}]: ${resp.message}`, 'error'); }
-    } catch (e) { toast(`${model} 测试出错: ${e.message}`, 'error'); }
-  }
+  toast(`正在为 ${tierLabel(tier)} 分组运行鹈鹕骑行检测 (gpt-6-astra)...`, 'info', 15000);
+  try {
+    const resp = await api.post('/run-iq-test', { tier, provider: 'openai' });
+    if (resp.code === 0) {
+      const r = resp.data;
+      const label = r.result === 'pass' ? '智力通过' : r.result === 'works' ? '可疑作品' : '降智记录';
+      toast(`gpt-6-astra [${tierLabel(tier)}]: ${label} (${(r.responseTime/1000).toFixed(1)}s)${r.svgCode ? ' · 已生成SVG动画' : ''}`, r.result === 'pass' ? 'success' : r.result === 'works' ? 'warning' : 'error', 6000);
+    } else { toast(`gpt-6-astra [${tierLabel(tier)}]: ${resp.message}`, 'error'); }
+  } catch (e) { toast(`gpt-6-astra 测试出错: ${e.message}`, 'error'); }
   renderIQTest(1);
 };
 
@@ -843,14 +872,16 @@ async function renderAdminAuditSection() {
   const actionLabels = {
     login: '登录', login_failed: '登录失败', config_save: '保存配置', config_batch_save: '批量保存配置',
     config_delete: '删除配置', channel_test: '渠道检测', auto_test: '自动检测', auto_test_error: '自动检测错误',
-    iq_test: '智力检测', token_query: '用量查询'
+    iq_test: '智力检测', token_query: '用量查询',
+    auto_iq_test: '自动智力检测', auto_iq_skip: '智力检测跳过', auto_iq_error: '智力检测错误'
   };
   const actionColors = {
     login: 'text-emerald-500 bg-emerald-500/10', login_failed: 'text-red-500 bg-red-500/10',
     config_save: 'text-blue-500 bg-blue-500/10', config_batch_save: 'text-blue-500 bg-blue-500/10',
     config_delete: 'text-red-500 bg-red-500/10', channel_test: 'text-purple-500 bg-purple-500/10',
     auto_test: 'text-cyan-500 bg-cyan-500/10', auto_test_error: 'text-red-500 bg-red-500/10',
-    iq_test: 'text-amber-500 bg-amber-500/10', token_query: 'text-primary-500 bg-primary-500/10'
+    iq_test: 'text-amber-500 bg-amber-500/10', token_query: 'text-primary-500 bg-primary-500/10',
+    auto_iq_test: 'text-orange-500 bg-orange-500/10', auto_iq_skip: 'text-gray-500 bg-gray-500/10', auto_iq_error: 'text-red-500 bg-red-500/10'
   };
 
   let html = `<div class="fade-in">`;
