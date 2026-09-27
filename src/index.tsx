@@ -348,7 +348,7 @@ async function runCandyTest(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { result: 'degraded', score: 0, rawResponse: `Error: ${e.message}`, reasoningTokens: 0, inputTokens: 0, outputTokens: 0, responseTime: Date.now() - startTime } }
 }
 
-const SVG_PROMPT_EN = `Create a single, complete, self-contained animated SVG, no external files. Side view, a cute pelican riding a bicycle. Pelican webbed feet on pedals, wings gripping handlebars, large orange throat pouch. Bicycle with frame, seat, pedals, rotating spoked wheels. CSS keyframe animation, wheels spin, legs pedal. Simple background, sky and road. Flat cartoon style, clean path, no JS. Output ONLY the SVG code, no explanations.`
+const SVG_PROMPT_EN = `创建一个 HTML，内容是 SVG 绘制一个鹈鹕骑自行车的 2D 动画`
 
 const SVG_MODELS = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5']
 
@@ -415,15 +415,15 @@ app.post('/api/admin/seed', authMiddleware, async (c) => {
     { name: 'Lite · GPT-5.6-SOL', provider: 'openai', tier: 'lite', model_id: 'gpt-5.6-sol', icon: '⚡', sort: 1 },
     { name: 'Lite · GPT-6-ASTRA', provider: 'openai', tier: 'lite', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
     { name: 'Lite · GPT-5.6-TERRA', provider: 'openai', tier: 'lite', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
-    { name: 'Lite · GPT-IMAGE-2', provider: 'openai', tier: 'lite', model_id: 'gpt-image-2', icon: '🎨', sort: 4 },
+    { name: 'Lite · GPT-6-SOL', provider: 'openai', tier: 'lite', model_id: 'gpt-6-sol', icon: '☀️', sort: 4 },
     { name: 'Standard · GPT-5.6-SOL', provider: 'openai', tier: 'standard', model_id: 'gpt-5.6-sol', icon: '⚡', sort: 1 },
     { name: 'Standard · GPT-6-ASTRA', provider: 'openai', tier: 'standard', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
     { name: 'Standard · GPT-5.6-TERRA', provider: 'openai', tier: 'standard', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
-    { name: 'Standard · GPT-IMAGE-2', provider: 'openai', tier: 'standard', model_id: 'gpt-image-2', icon: '🎨', sort: 4 },
+    { name: 'Standard · GPT-6-SOL', provider: 'openai', tier: 'standard', model_id: 'gpt-6-sol', icon: '☀️', sort: 4 },
     { name: 'Ultra · GPT-5.6-SOL', provider: 'openai', tier: 'ultra', model_id: 'gpt-5.6-sol', icon: '⚡', sort: 1 },
     { name: 'Ultra · GPT-6-ASTRA', provider: 'openai', tier: 'ultra', model_id: 'gpt-6-astra', icon: '🌟', sort: 2 },
     { name: 'Ultra · GPT-5.6-TERRA', provider: 'openai', tier: 'ultra', model_id: 'gpt-5.6-terra', icon: '🌍', sort: 3 },
-    { name: 'Ultra · GPT-IMAGE-2', provider: 'openai', tier: 'ultra', model_id: 'gpt-image-2', icon: '🎨', sort: 4 },
+    { name: 'Ultra · GPT-6-SOL', provider: 'openai', tier: 'ultra', model_id: 'gpt-6-sol', icon: '☀️', sort: 4 },
     { name: 'Lite · Claude-Opus-4-6', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-6', icon: '✨', sort: 1 },
     { name: 'Lite · Claude-Fable-5', provider: 'anthropic', tier: 'lite', model_id: 'claude-fable-5', icon: '📖', sort: 2 },
     { name: 'Lite · Claude-Opus-4-7', provider: 'anthropic', tier: 'lite', model_id: 'claude-opus-4-7', icon: '🔮', sort: 3 },
@@ -626,6 +626,8 @@ function getIndexHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>元擎智算可视化</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <script>

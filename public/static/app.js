@@ -1872,12 +1872,166 @@ window.showLogDetail = function(idx) {
     </div>`;
 };
 
+// ===== CONTACT US PAGE =====
+function renderContactUs() {
+  const ct = document.getElementById('page-content');
+  const d = isDark();
+
+  let html = `<div class="max-w-4xl mx-auto fade-in">
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-500/20 via-primary-400/10 to-cyan-500/20 mb-4 relative">
+        <i class="fas fa-headset text-3xl text-primary-500"></i>
+      </div>
+      <h2 class="text-2xl font-bold ${cls.text()} mb-2">联系我们</h2>
+      <p class="${cls.textSub()} text-sm">元擎智算 Token 工厂 · 一站式 AI API 服务平台</p>
+    </div>
+
+    <!-- Token Factory Info Card -->
+    <div class="${cls.card()} overflow-hidden mb-6">
+      <div class="h-1.5 bg-gradient-to-r from-primary-500 via-cyan-500 to-purple-500"></div>
+      <div class="p-6">
+        <div class="flex items-start gap-4 mb-6">
+          <div class="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 shadow-lg border-2 ${d ? 'border-slate-600' : 'border-gray-200'}">
+            <img src="/static/logo.png" alt="元擎AI" class="w-full h-full object-cover">
+          </div>
+          <div class="flex-1">
+            <h3 class="text-lg font-bold ${cls.text()} mb-1">元擎智算 · Token 工厂</h3>
+            <p class="${cls.textSub()} text-sm leading-relaxed">元擎智算 Token 工厂是一站式 AI API 中转服务平台，提供 OpenAI、Anthropic 等主流模型的 API 接入服务。我们致力于为开发者提供稳定、高效、低延迟的 AI 能力调用。</p>
+          </div>
+        </div>
+
+        <!-- Key Features -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-xl p-3.5 text-center">
+            <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center mx-auto mb-2"><i class="fas fa-bolt text-emerald-500"></i></div>
+            <h4 class="text-xs font-semibold ${cls.text()} mb-0.5">低延迟</h4>
+            <p class="${cls.textMuted()} text-[10px]">全球边缘加速</p>
+          </div>
+          <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-xl p-3.5 text-center">
+            <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center mx-auto mb-2"><i class="fas fa-shield-alt text-blue-500"></i></div>
+            <h4 class="text-xs font-semibold ${cls.text()} mb-0.5">高可用</h4>
+            <p class="${cls.textMuted()} text-[10px]">多线路智能切换</p>
+          </div>
+          <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-xl p-3.5 text-center">
+            <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center mx-auto mb-2"><i class="fas fa-cubes text-purple-500"></i></div>
+            <h4 class="text-xs font-semibold ${cls.text()} mb-0.5">全模型</h4>
+            <p class="${cls.textMuted()} text-[10px]">支持主流AI模型</p>
+          </div>
+          <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-xl p-3.5 text-center">
+            <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mx-auto mb-2"><i class="fas fa-chart-line text-amber-500"></i></div>
+            <h4 class="text-xs font-semibold ${cls.text()} mb-0.5">实时监控</h4>
+            <p class="${cls.textMuted()} text-[10px]">渠道状态透明可查</p>
+          </div>
+        </div>
+
+        <!-- Service Info -->
+        <div class="${d ? 'bg-slate-700/30 border-slate-600' : 'bg-primary-50/50 border-primary-100'} border rounded-xl p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <i class="fas fa-server text-primary-500 text-sm"></i>
+            <h4 class="text-sm font-semibold ${cls.text()}">服务信息</h4>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div class="flex items-center gap-2">
+              <span class="${cls.textMuted()} text-xs min-w-[70px]">API 域名</span>
+              <code class="px-2 py-0.5 rounded text-xs font-mono ${d ? 'bg-slate-700 text-cyan-400' : 'bg-white text-primary-600'} border ${d ? 'border-slate-600' : 'border-primary-200'}">api.icloud99.cn</code>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="${cls.textMuted()} text-xs min-w-[70px]">监控面板</span>
+              <code class="px-2 py-0.5 rounded text-xs font-mono ${d ? 'bg-slate-700 text-cyan-400' : 'bg-white text-primary-600'} border ${d ? 'border-slate-600' : 'border-primary-200'}">edge.lingsuan.org</code>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="${cls.textMuted()} text-xs min-w-[70px]">支持协议</span>
+              <span class="text-xs ${cls.text()}">OpenAI 兼容格式 (Chat Completions API)</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="${cls.textMuted()} text-xs min-w-[70px]">分组类型</span>
+              <span class="text-xs ${cls.text()}">Lite / Standard / Ultra 三档分组</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR Code Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      <!-- QQ Card -->
+      <div class="${cls.card()} overflow-hidden group hover:shadow-lg transition-all">
+        <div class="h-1 bg-gradient-to-r from-blue-400 to-cyan-500"></div>
+        <div class="p-6 text-center">
+          <div class="inline-flex items-center gap-2 mb-4">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center shadow-md">
+              <i class="fab fa-qq text-white text-lg"></i>
+            </div>
+            <div class="text-left">
+              <h3 class="text-base font-bold ${cls.text()}">QQ 联系</h3>
+              <p class="${cls.textSub()} text-xs">扫码加好友</p>
+            </div>
+          </div>
+          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-4 inline-block shadow-inner mb-4">
+            <img src="/static/qr-qq.png" alt="QQ 二维码" class="w-52 h-52 object-contain">
+          </div>
+          <div class="flex items-center justify-center gap-2">
+            <span class="${cls.textMuted()} text-sm">QQ号:</span>
+            <span class="font-mono font-bold text-lg ${cls.text()}">3640113361</span>
+            <button onclick="copyToClipboard('3640113361','QQ号')" class="p-1.5 rounded-lg ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors" title="复制QQ号"><i class="fas fa-copy text-xs"></i></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- WeChat Card -->
+      <div class="${cls.card()} overflow-hidden group hover:shadow-lg transition-all">
+        <div class="h-1 bg-gradient-to-r from-green-400 to-emerald-500"></div>
+        <div class="p-6 text-center">
+          <div class="inline-flex items-center gap-2 mb-4">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center shadow-md">
+              <i class="fab fa-weixin text-white text-lg"></i>
+            </div>
+            <div class="text-left">
+              <h3 class="text-base font-bold ${cls.text()}">微信联系</h3>
+              <p class="${cls.textSub()} text-xs">扫码添加好友</p>
+            </div>
+          </div>
+          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-4 inline-block shadow-inner mb-4">
+            <img src="/static/qr-wechat.png" alt="微信二维码" class="w-52 h-52 object-contain">
+          </div>
+          <div class="flex items-center justify-center gap-2">
+            <span class="${cls.textMuted()} text-sm">微信名:</span>
+            <span class="font-medium text-lg ${cls.text()}">元擎のAI助手</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer Note -->
+    <div class="text-center ${cls.textMuted()} text-xs pb-4">
+      <p><i class="fas fa-info-circle mr-1"></i>工作日 9:00 - 22:00 在线，非工作时间请留言，我们会尽快回复。</p>
+    </div>
+  </div>`;
+
+  ct.innerHTML = html;
+}
+
+window.copyToClipboard = function(text, label) {
+  navigator.clipboard.writeText(text).then(() => {
+    toast(label + ' 已复制到剪贴板', 'success');
+  }).catch(() => {
+    // fallback
+    const el = document.createElement('textarea');
+    el.value = text; document.body.appendChild(el);
+    el.select(); document.execCommand('copy');
+    document.body.removeChild(el);
+    toast(label + ' 已复制到剪贴板', 'success');
+  });
+};
+
 // ===== MAIN LAYOUT =====
 const MENU = [
   { id: 'token-usage', label: '用量查询', icon: 'fas fa-chart-line' },
   { id: 'channel-status', label: '渠道状态', icon: 'fas fa-satellite-dish' },
   { id: 'iq-radar', label: 'GPT智商雷达', icon: 'fas fa-crosshairs' },
   { id: 'iq-test', label: '智力检测', icon: 'fas fa-brain' },
+  { id: 'contact-us', label: '联系我们', icon: 'fas fa-address-book' },
   { id: 'admin-settings', label: '管理设置', icon: 'fas fa-cog' },
 ];
 
@@ -1899,6 +2053,7 @@ function render() {
         <header class="h-14 flex items-center justify-between px-4 border-b ${d?'bg-slate-800/80 border-slate-700':'bg-white/80 border-gray-200'} glass flex-shrink-0">
           <div class="flex items-center gap-3">
             <button onclick="store.toggleSidebar()" class="p-2 rounded-lg ${d?'hover:bg-slate-700 text-slate-400':'hover:bg-gray-100 text-gray-500'}"><i class="fas fa-bars"></i></button>
+            <img src="/static/logo.png" alt="元擎智算" class="w-7 h-7 rounded-lg object-cover shadow-sm">
             <span class="text-sm font-medium ${cls.text()}">${MENU.find(m=>m.id===store.currentPage)?.label||''}</span>
           </div>
           <div class="flex items-center gap-2">
@@ -1914,6 +2069,7 @@ function render() {
     case 'channel-status': renderChannelStatus(); break;
     case 'iq-radar': renderIQRadar(); break;
     case 'iq-test': renderIQTest(); break;
+    case 'contact-us': renderContactUs(); break;
     case 'admin-settings': renderAdminSettings(); break;
   }
 }
