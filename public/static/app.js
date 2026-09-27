@@ -5,6 +5,7 @@ const store = {
   token: localStorage.getItem('token') || '',
   user: null,
   sidebarOpen: window.innerWidth > 768,
+  isMobile: window.innerWidth <= 768,
   iqPage: 1,
   iqTotalPages: 1,
   chProvider: 'anthropic',
@@ -12,12 +13,22 @@ const store = {
   chTotalPages: 1,
   chChannels: null,
   setTheme(t) { this.theme = t; localStorage.setItem('theme', t); document.documentElement.setAttribute('data-theme', t); render(); },
-  setPage(p) { this.currentPage = p; render(); },
+  setPage(p) { this.currentPage = p; if (this.isMobile) this.sidebarOpen = false; render(); },
   setToken(t) { this.token = t; localStorage.setItem('token', t); },
   logout() { this.token = ''; this.user = null; localStorage.removeItem('token'); this.setPage('channel-status'); },
-  toggleSidebar() { this.sidebarOpen = !this.sidebarOpen; render(); }
+  toggleSidebar() { this.sidebarOpen = !this.sidebarOpen; render(); },
+  closeSidebarMobile() { if (this.isMobile && this.sidebarOpen) { this.sidebarOpen = false; render(); } }
 };
 document.documentElement.setAttribute('data-theme', store.theme);
+// Listen for resize to update isMobile
+window.addEventListener('resize', () => {
+  const wasMobile = store.isMobile;
+  store.isMobile = window.innerWidth <= 768;
+  if (wasMobile !== store.isMobile) {
+    store.sidebarOpen = !store.isMobile;
+    render();
+  }
+});
 
 // ===== Toast System =====
 function toast(msg, type = 'info', duration = 3000) {
@@ -37,14 +48,14 @@ function showModal(title, content, actions = []) {
   const d = isDark();
   const root = document.getElementById('modal-root');
   root.innerHTML = `
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
-      <div class="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800 border border-slate-700' : 'bg-white'}" onclick="event.stopPropagation()">
-        <div class="h-1 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-600"></div>
-        <div class="p-6">
-          <h3 class="text-lg font-semibold ${d ? 'text-slate-100' : 'text-gray-800'} mb-4">${title}</h3>
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-end sm:items-center justify-center sm:p-4 fade-in" onclick="closeModal()">
+      <div class="w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800 border border-slate-700' : 'bg-white'} max-h-[85vh] flex flex-col" onclick="event.stopPropagation()">
+        <div class="h-1 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-600 flex-shrink-0"></div>
+        <div class="p-5 sm:p-6 overflow-y-auto">
+          <h3 class="text-base sm:text-lg font-semibold ${d ? 'text-slate-100' : 'text-gray-800'} mb-4">${title}</h3>
           <div class="${d ? 'text-slate-300' : 'text-gray-600'} text-sm">${content}</div>
         </div>
-        <div class="px-6 pb-6 flex justify-end gap-3">
+        <div class="px-5 sm:px-6 pb-5 sm:pb-6 flex justify-end gap-2 sm:gap-3 flex-shrink-0 safe-bottom">
           <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm border ${d ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}">取消</button>
           ${actions.map(a => `<button onclick="${a.action}" class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r ${a.danger ? 'from-red-500 to-red-600 hover:from-red-600 hover:to-red-700' : 'from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700'}">${a.label}</button>`).join('')}
         </div>
@@ -218,29 +229,29 @@ function renderChannelStatusContent(channels) {
   const tabCls = (p) => {
     const active = p === prov;
     const info = providerInfo[p];
-    if (active) return `px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r ${info.bgActive} shadow-md cursor-default transition-all`;
-    return `px-5 py-2.5 rounded-xl text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} cursor-pointer transition-all`;
+    if (active) return `px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-gradient-to-r ${info.bgActive} shadow-md cursor-default transition-all`;
+    return `px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} cursor-pointer transition-all`;
   };
 
-  let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-    <div class="flex items-center gap-3"><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-satellite-dish mr-2 text-primary-500"></i>渠道状态</h2><span class="${sColor} px-3 py-1 rounded-full text-xs font-bold">${status}</span></div>
-    <div class="flex items-center gap-2">
+  let html = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+    <div class="flex items-center gap-3"><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-satellite-dish mr-2 text-primary-500"></i>渠道状态</h2><span class="${sColor} px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold">${status}</span></div>
+    <div class="flex items-center gap-2 flex-wrap">
       ${isTestRunning
-        ? `<button onclick="stopChannelTests()" class="px-4 py-2 rounded-lg text-xs font-medium text-white bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 shadow-sm"><i class="fas fa-stop mr-1"></i>停止检测 (${immediateTestCount}/${immediateTestTotal})</button>`
+        ? `<button onclick="stopChannelTests()" class="px-3 py-2 rounded-lg text-xs font-medium text-white bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 shadow-sm"><i class="fas fa-stop mr-1"></i>停止 (${immediateTestCount}/${immediateTestTotal})</button>`
         : loggedIn
-          ? `<button onclick="runChannelTests()" class="${cls.btn()} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测 (60轮)</button>`
+          ? `<button onclick="runChannelTests()" class="${cls.btn()} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测</button>`
           : `<button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-vial mr-1"></i>立即检测 🔒</button>`}
       <button onclick="store.chChannels=null;renderChannelStatus()" class="px-3 py-2 rounded-lg text-xs ${d ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"><i class="fas fa-sync-alt"></i></button>
-      <span class="${cls.textMuted()} text-xs"><i class="fas fa-clock mr-1"></i>每小时自动检测</span>
+      <span class="${cls.textMuted()} text-xs hidden sm:inline"><i class="fas fa-clock mr-1"></i>每小时自动检测</span>
     </div></div>`;
 
   // Provider tabs (Anthropic first)
-  html += `<div class="flex items-center gap-3 mb-6">
+  html += `<div class="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
     <button onclick="switchChProvider('anthropic')" class="${tabCls('anthropic')}">
-      <span class="mr-1.5">${providerInfo.anthropic.icon}</span>Anthropic<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='anthropic'?'bg-white/20 text-white':'opacity-60'}">${anthropicCount}</span>
+      <span class="mr-1">${providerInfo.anthropic.icon}</span><span class="hidden sm:inline">Anthropic</span><span class="sm:hidden">Ant.</span><span class="ml-1.5 sm:ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='anthropic'?'bg-white/20 text-white':'opacity-60'}">${anthropicCount}</span>
     </button>
     <button onclick="switchChProvider('openai')" class="${tabCls('openai')}">
-      <span class="mr-1.5">${providerInfo.openai.icon}</span>OpenAI<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='openai'?'bg-white/20 text-white':'opacity-60'}">${openaiCount}</span>
+      <span class="mr-1">${providerInfo.openai.icon}</span>OpenAI<span class="ml-1.5 sm:ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${prov==='openai'?'bg-white/20 text-white':'opacity-60'}">${openaiCount}</span>
     </button>
   </div>`;
 
@@ -268,30 +279,7 @@ window.switchChProvider = function(prov) {
 };
 
 function renderChPagination(currentPage, totalPages, total) {
-  const d = isDark();
-  const btnBase = `px-3 py-2 rounded-lg text-sm font-medium transition-all`;
-  const btnActive = `${btnBase} bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm`;
-  const btnNormal = `${btnBase} ${d ? 'text-slate-300 hover:bg-slate-700 border border-slate-600' : 'text-gray-700 hover:bg-gray-100 border border-gray-300'}`;
-  const btnDis = `${btnBase} ${d ? 'text-slate-600 border border-slate-700 cursor-not-allowed' : 'text-gray-300 border border-gray-200 cursor-not-allowed'}`;
-  let pages = [1];
-  let start = Math.max(2, currentPage - 2), end = Math.min(totalPages - 1, currentPage + 2);
-  if (start > 2) pages.push('...');
-  for (let i = start; i <= end; i++) pages.push(i);
-  if (end < totalPages - 1) pages.push('...');
-  if (totalPages > 1) pages.push(totalPages);
-  let html = `<div class="flex items-center justify-center gap-2 mt-8 mb-4 flex-wrap">`;
-  html += `<button onclick="goChPage(1)" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
-  html += `<button onclick="goChPage(${currentPage-1})" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="上一页"><i class="fas fa-angle-left text-xs"></i></button>`;
-  for (const p of pages) {
-    if (p === '...') html += `<span class="px-2 py-2 text-sm ${cls.textMuted()}">…</span>`;
-    else html += `<button onclick="goChPage(${p})" class="${p===currentPage?btnActive:btnNormal}">${p}</button>`;
-  }
-  html += `<button onclick="goChPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="下一页"><i class="fas fa-angle-right text-xs"></i></button>`;
-  html += `<button onclick="goChPage(${totalPages})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
-  html += `<div class="flex items-center gap-2 ml-4"><span class="${cls.textSub()} text-sm">跳至</span><input id="ch-page-jump" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')jumpChPage()"><span class="${cls.textSub()} text-sm">页</span><button onclick="jumpChPage()" class="${btnNormal} !px-3 !py-1.5">GO</button></div>`;
-  html += `<span class="${cls.textMuted()} text-xs ml-3">共 ${total} 个渠道 / ${totalPages} 页</span>`;
-  html += `</div>`;
-  return html;
+  return renderGenericPagination(currentPage, totalPages, total, 'goChPage', 'ch-page-jump', 'jumpChPage', isDark());
 }
 
 window.goChPage = function(p) {
@@ -355,15 +343,15 @@ function renderChannelCard(ch) {
     : speed.label === '拥堵' ? (isDark() ? 'bg-red-900/50 text-red-400 border-red-700/50' : 'bg-red-50 text-red-600 border-red-200')
     : (isDark() ? 'bg-slate-700 text-slate-400 border-slate-600' : 'bg-gray-100 text-gray-500 border-gray-200');
 
-  return `<div class="${cls.card()} p-4 fade-in cursor-pointer" onclick="showChannelDetail(${ch.id})">
-    <div class="flex items-start justify-between mb-3"><div class="flex items-center gap-2"><span class="text-lg">${ch.icon||'📡'}</span><div><h4 class="text-sm font-semibold ${cls.text()}">${ch.name}</h4><p class="${cls.textMuted()} text-xs font-mono">${ch.model_id}</p></div></div>
-    <div class="flex items-center gap-2">
-      <span class="${cls.textMuted()} text-[11px] font-mono">倍率:${rateMultiplier}x</span>
-      <span class="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${speedBadgeColor}"><span class="w-1.5 h-1.5 rounded-full ${speed.dot} pulse-dot"></span>${speed.label}</span>
+  return `<div class="${cls.card()} p-3 sm:p-4 fade-in cursor-pointer" onclick="showChannelDetail(${ch.id})">
+    <div class="flex items-start justify-between mb-2 sm:mb-3"><div class="flex items-center gap-2 min-w-0"><span class="text-base sm:text-lg">${ch.icon||'📡'}</span><div class="min-w-0"><h4 class="text-xs sm:text-sm font-semibold ${cls.text()} truncate">${ch.name}</h4><p class="${cls.textMuted()} text-[10px] sm:text-xs font-mono truncate">${ch.model_id}</p></div></div>
+    <div class="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+      <span class="${cls.textMuted()} text-[10px] font-mono hidden sm:inline">倍率:${rateMultiplier}x</span>
+      <span class="flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium border ${speedBadgeColor}"><span class="w-1.5 h-1.5 rounded-full ${speed.dot} pulse-dot"></span>${speed.label}</span>
     </div></div>
-    <div class="flex items-end justify-between mb-3"><div class="flex gap-4 text-xs"><div><span class="${cls.textMuted()}">对话延迟</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.response_time_ms:'-'}ms</span></div><div><span class="${cls.textMuted()}">端点 PING</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.ping_ms:'-'}ms</span></div></div>
-    <span class="text-2xl font-bold ${rateColor}">${rate}%</span></div>
-    <div class="flex items-center justify-between mb-1"><span class="${cls.textMuted()} text-xs">${ch.total_tests}次检测</span></div>
+    <div class="flex items-end justify-between mb-2 sm:mb-3"><div class="flex gap-3 sm:gap-4 text-[10px] sm:text-xs"><div><span class="${cls.textMuted()}">延迟</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.response_time_ms:'-'}ms</span></div><div><span class="${cls.textMuted()}">PING</span> <span class="font-mono font-medium ${cls.text()}">${lt?lt.ping_ms:'-'}ms</span></div></div>
+    <span class="text-xl sm:text-2xl font-bold ${rateColor}">${rate}%</span></div>
+    <div class="flex items-center justify-between mb-1"><span class="${cls.textMuted()} text-[10px] sm:text-xs">${ch.total_tests}次检测</span></div>
     <div class="bar-chart-mini">${bars}</div></div>`;
 }
 
@@ -390,42 +378,55 @@ window.showChannelDetail = async function(channelId) {
       : (d ? 'bg-red-900/50 text-red-400' : 'bg-red-100 text-red-700');
 
     root.innerHTML = `
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
-      <div class="w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()">
-        <div class="flex items-center justify-between px-6 py-4 border-b ${d ? 'border-slate-700' : 'border-gray-200'}">
-          <div class="flex items-center gap-2">
-            <span class="text-xl">${ch.icon || '📡'}</span>
-            <h3 class="text-base font-bold ${cls.text()}">${ch.name}</h3>
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-end sm:items-center justify-center sm:p-4 fade-in" onclick="closeModal()">
+      <div class="w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'} max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b ${d ? 'border-slate-700' : 'border-gray-200'} flex-shrink-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="text-lg sm:text-xl">${ch.icon || '📡'}</span>
+            <h3 class="text-sm sm:text-base font-bold ${cls.text()} truncate">${ch.name}</h3>
           </div>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times"></i></button>
+          <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times"></i></button>
         </div>
-        <div class="p-6 overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="border-b ${d ? 'border-slate-700' : 'border-gray-200'}">
+        <div class="flex-1 overflow-y-auto">
+          <!-- Mobile: stacked layout; Desktop: table -->
+          <div class="hidden sm:block p-4 sm:p-6 overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b ${d ? 'border-slate-700' : 'border-gray-200'}">
                 <th class="text-left pb-3 font-medium ${cls.textSub()}">模型</th>
-                <th class="text-left pb-3 font-medium ${cls.textSub()}">最新状态</th>
-                <th class="text-left pb-3 font-medium ${cls.textSub()}">最新延迟 (MS)</th>
-                <th class="text-left pb-3 font-medium ${cls.textSub()}">7 天可用率</th>
-                <th class="text-left pb-3 font-medium ${cls.textSub()}">15 天可用率</th>
-                <th class="text-left pb-3 font-medium ${cls.textSub()}">30 天可用率</th>
-                <th class="text-left pb-3 font-medium ${cls.textSub()}">7 天平均延迟 (MS)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">状态</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">延迟</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">7天</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">15天</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">30天</th>
+                <th class="text-left pb-3 font-medium ${cls.textSub()}">平均延迟</th>
+              </tr></thead>
+              <tbody><tr>
                 <td class="py-3 font-mono ${cls.text()}">${ch.model_id}</td>
                 <td class="py-3"><span class="px-2 py-1 rounded text-xs font-medium ${statusColor}">${data.latest_status}</span></td>
-                <td class="py-3 font-mono ${cls.text()}">${data.latest_latency}</td>
+                <td class="py-3 font-mono ${cls.text()}">${data.latest_latency}ms</td>
                 <td class="py-3 font-mono ${cls.text()}">${data.availability_7d}</td>
                 <td class="py-3 font-mono ${cls.text()}">${data.availability_15d}</td>
                 <td class="py-3 font-mono ${cls.text()}">${data.availability_30d}</td>
-                <td class="py-3 font-mono ${cls.text()}">${data.avg_latency_7d}</td>
-              </tr>
-            </tbody>
-          </table>
+                <td class="py-3 font-mono ${cls.text()}">${data.avg_latency_7d}ms</td>
+              </tr></tbody>
+            </table>
+          </div>
+          <!-- Mobile stacked cards -->
+          <div class="sm:hidden p-4 space-y-3">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="font-mono text-xs ${cls.text()}">${ch.model_id}</span>
+              <span class="px-2 py-0.5 rounded text-xs font-medium ${statusColor}">${data.latest_status}</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-lg p-2.5"><span class="${cls.textMuted()} block mb-0.5">最新延迟</span><span class="font-mono font-medium ${cls.text()}">${data.latest_latency}ms</span></div>
+              <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-lg p-2.5"><span class="${cls.textMuted()} block mb-0.5">平均延迟(7d)</span><span class="font-mono font-medium ${cls.text()}">${data.avg_latency_7d}ms</span></div>
+              <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-lg p-2.5"><span class="${cls.textMuted()} block mb-0.5">7天可用率</span><span class="font-mono font-medium ${cls.text()}">${data.availability_7d}</span></div>
+              <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-lg p-2.5"><span class="${cls.textMuted()} block mb-0.5">15天可用率</span><span class="font-mono font-medium ${cls.text()}">${data.availability_15d}</span></div>
+              <div class="${d ? 'bg-slate-700/50' : 'bg-gray-50'} rounded-lg p-2.5 col-span-2"><span class="${cls.textMuted()} block mb-0.5">30天可用率</span><span class="font-mono font-medium ${cls.text()}">${data.availability_30d}</span></div>
+            </div>
+          </div>
         </div>
-        <div class="px-6 pb-5 flex justify-end">
+        <div class="px-4 sm:px-6 pb-4 sm:pb-5 flex justify-end flex-shrink-0 safe-bottom">
           <button onclick="closeModal()" class="px-5 py-2 rounded-lg text-sm font-medium border ${d ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}">关闭</button>
         </div>
       </div>
@@ -494,8 +495,8 @@ function renderIQRadar() {
   const ct = document.getElementById('page-content');
   const theme = store.theme;
   const radarUrl = `https://iq-radar.pages.dev/?user_id=118508&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMTg1MDgsImVtYWlsIjoiNjkxMTgxMzY0QHFxLmNvbSIsInJvbGUiOiJ1c2VyIiwidG9rZW5fdmVyc2lvbiI6OTAyMTA4NTA5NTAzNTY2NTYzOCwic2lkIjoiYzAwMTliNWUxNDI3YzFkMWE3N2FiMjNkOTVkOWUzMmYiLCJibmQiOiI1MmRmMGNjNDUzNTMzY2ZjM2ZmZTVmMDMyY2U2NDgxNyIsImV4cCI6MTc4OTY1MTI5NywibmJmIjoxNzg5NTY0ODk3LCJpYXQiOjE3ODk1NjQ4OTd9.p_sbrD5i_AlCCe0RWGnv3rzTnIvABhuIyuSxuwlxf94&theme=${theme}&lang=zh&ui_mode=embedded&src_host=https://edge.lingsuan.org&src_url=https://edge.lingsuan.org/custom/c0d43342ecab1260`;
-  ct.innerHTML = `<div class="flex items-center justify-between mb-4"><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-crosshairs mr-2 text-primary-500"></i>GPT 智商雷达</h2><a href="${radarUrl}" target="_blank" class="${cls.btnSec()} text-xs"><i class="fas fa-external-link-alt mr-1"></i>新窗口打开</a></div>
-    <div class="${cls.card()} overflow-hidden" style="height:calc(100vh - 160px)"><iframe id="iq-radar-frame" src="${radarUrl}" class="w-full h-full border-0" allow="fullscreen" loading="lazy"></iframe></div>`;
+  ct.innerHTML = `<div class="flex items-center justify-between gap-2 mb-3 sm:mb-4"><h2 class="text-base sm:text-lg font-semibold ${cls.text()} truncate"><i class="fas fa-crosshairs mr-2 text-primary-500"></i>GPT 智商雷达</h2><a href="${radarUrl}" target="_blank" class="${cls.btnSec()} text-xs flex-shrink-0"><i class="fas fa-external-link-alt mr-1"></i><span class="hidden sm:inline">新窗口</span>打开</a></div>
+    <div class="${cls.card()} overflow-hidden" style="height:calc(100vh - 140px)"><iframe id="iq-radar-frame" src="${radarUrl}" class="w-full h-full border-0" allow="fullscreen" loading="lazy"></iframe></div>`;
 }
 
 // ===== IQ TEST PAGE (with pagination: 2 rows x 6 columns = 12 per page) =====
@@ -528,18 +529,18 @@ async function renderIQTest(page) {
 
   const loggedIn = isLoggedIn();
 
-  let html = `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-xs mt-1">Codex Candy Eval + Pelican Bicycle · 每3小时轮转 Lite → Standard → Ultra</p></div>
-    <div class="flex gap-2">`;
+  let html = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+    <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-brain mr-2 text-primary-500"></i>智力检测 · 鹈鹕骑行</h2><p class="${cls.textSub()} text-[10px] sm:text-xs mt-1">Candy Eval + Pelican Bicycle · 每3小时轮转</p></div>
+    <div class="flex gap-1.5 sm:gap-2">`;
 
   if (loggedIn) {
-    html += `<button onclick="runIQTestForTier('lite')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Lite</button>
-      <button onclick="runIQTestForTier('standard')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Standard</button>
-      <button onclick="runIQTestForTier('ultra')" class="${cls.btn()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Ultra</button>`;
+    html += `<button onclick="runIQTestForTier('lite')" class="${cls.btn()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Lite</button>
+      <button onclick="runIQTestForTier('standard')" class="${cls.btn()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Std</button>
+      <button onclick="runIQTestForTier('ultra')" class="${cls.btn()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Ultra</button>`;
   } else {
-    html += `<button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Lite 🔒</button>
-      <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Standard 🔒</button>
-      <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2"><i class="fas fa-play mr-1"></i>Ultra 🔒</button>`;
+    html += `<button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Lite 🔒</button>
+      <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Std 🔒</button>
+      <button onclick="requireLogin('检测')" class="${cls.btnDisabled()} text-xs !py-2 !px-2.5 sm:!px-4"><i class="fas fa-play mr-1"></i>Ultra 🔒</button>`;
   }
   html += `</div></div>`;
 
@@ -561,7 +562,7 @@ async function renderIQTest(page) {
   if (tests.length === 0 && currentPage === 1) {
     html += `<div class="text-center py-16 fade-in"><div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/20 flex items-center justify-center mx-auto mb-3"><i class="fas fa-bicycle text-2xl text-primary-500"></i></div><p class="${cls.text()} font-semibold">尚无检测记录</p><p class="${cls.textSub()} text-sm mt-1">点击上方按钮开始鹈鹕骑行智力检测</p></div>`;
   } else {
-    html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">`;
+    html += `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">`;
     tests.forEach((t, idx) => {
       const hasSvg = t.svg_code && t.svg_code.length > 50 && t.svg_code.includes('<svg');
       const hasImg = !hasSvg && t.image_url && t.image_url.length > 10;
@@ -608,59 +609,7 @@ async function renderIQTest(page) {
 }
 
 function renderPagination(currentPage, totalPages, total) {
-  const d = isDark();
-  const btnBase = `px-3 py-2 rounded-lg text-sm font-medium transition-all`;
-  const btnActive = `${btnBase} bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm`;
-  const btnNormal = `${btnBase} ${d ? 'text-slate-300 hover:bg-slate-700 border border-slate-600' : 'text-gray-700 hover:bg-gray-100 border border-gray-300'}`;
-  const btnDisabledCls = `${btnBase} ${d ? 'text-slate-600 border border-slate-700 cursor-not-allowed' : 'text-gray-300 border border-gray-200 cursor-not-allowed'}`;
-
-  let pages = [];
-  // Always show first page
-  pages.push(1);
-  // Show pages around current
-  let start = Math.max(2, currentPage - 2);
-  let end = Math.min(totalPages - 1, currentPage + 2);
-  if (start > 2) pages.push('...');
-  for (let i = start; i <= end; i++) pages.push(i);
-  if (end < totalPages - 1) pages.push('...');
-  // Always show last page
-  if (totalPages > 1) pages.push(totalPages);
-
-  let html = `<div class="flex items-center justify-center gap-2 mt-8 mb-4 flex-wrap">`;
-
-  // First page button
-  html += `<button onclick="goIQPage(1)" ${currentPage === 1 ? 'disabled' : ''} class="${currentPage === 1 ? btnDisabledCls : btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
-
-  // Previous button
-  html += `<button onclick="goIQPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="${currentPage === 1 ? btnDisabledCls : btnNormal}" title="上一页"><i class="fas fa-angle-left text-xs"></i></button>`;
-
-  // Page numbers
-  for (const p of pages) {
-    if (p === '...') {
-      html += `<span class="px-2 py-2 text-sm ${cls.textMuted()}">…</span>`;
-    } else {
-      html += `<button onclick="goIQPage(${p})" class="${p === currentPage ? btnActive : btnNormal}">${p}</button>`;
-    }
-  }
-
-  // Next button
-  html += `<button onclick="goIQPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="${currentPage === totalPages ? btnDisabledCls : btnNormal}" title="下一页"><i class="fas fa-angle-right text-xs"></i></button>`;
-
-  // Last page button
-  html += `<button onclick="goIQPage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''} class="${currentPage === totalPages ? btnDisabledCls : btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
-
-  // Page jump input
-  html += `<div class="flex items-center gap-2 ml-4">
-    <span class="${cls.textSub()} text-sm">跳至</span>
-    <input id="iq-page-jump" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')jumpIQPage()">
-    <span class="${cls.textSub()} text-sm">页</span>
-    <button onclick="jumpIQPage()" class="${btnNormal} !px-3 !py-1.5">GO</button>
-  </div>`;
-
-  // Total info
-  html += `<span class="${cls.textMuted()} text-xs ml-3">共 ${total} 条 / ${totalPages} 页</span>`;
-  html += `</div>`;
-  return html;
+  return renderGenericPagination(currentPage, totalPages, total, 'goIQPage', 'iq-page-jump', 'jumpIQPage', isDark());
 }
 
 window.goIQPage = function(page) {
@@ -730,22 +679,22 @@ async function renderAdminSettings() {
 
   // Settings section tabs
   const sTabCls = (t) => {
-    if (t === stab) return `px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-sm transition-all`;
-    return `px-4 py-2 rounded-lg text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} transition-all cursor-pointer`;
+    if (t === stab) return `px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-sm transition-all`;
+    return `px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} transition-all cursor-pointer`;
   };
 
-  let html = `<div class="flex items-center justify-between mb-6">
-    <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-cog mr-2 text-primary-500"></i>管理设置</h2><p class="${cls.textSub()} text-xs mt-1">API密钥配置、审计日志、安全设置</p></div>
+  let html = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+    <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-cog mr-2 text-primary-500"></i>管理设置</h2><p class="${cls.textSub()} text-[10px] sm:text-xs mt-1">API密钥配置、审计日志、安全设置</p></div>
     <div class="flex gap-2">
-      <button onclick="doInitSeed()" class="${cls.btnSec()} text-xs"><i class="fas fa-database mr-1"></i>初始化数据</button>
+      <button onclick="doInitSeed()" class="${cls.btnSec()} text-xs"><i class="fas fa-database mr-1"></i>初始化</button>
       <button onclick="store.logout()" class="${cls.btnSec()} text-xs"><i class="fas fa-sign-out-alt mr-1"></i>退出</button>
     </div></div>`;
 
   // Section tabs
-  html += `<div class="flex items-center gap-2 mb-6">
-    <button onclick="switchSettingsTab('config')" class="${sTabCls('config')}"><i class="fas fa-key mr-1.5"></i>API 密钥</button>
-    <button onclick="switchSettingsTab('audit')" class="${sTabCls('audit')}"><i class="fas fa-clipboard-list mr-1.5"></i>审计日志</button>
-    <button onclick="switchSettingsTab('security')" class="${sTabCls('security')}"><i class="fas fa-shield-alt mr-1.5"></i>安全设置</button>
+  html += `<div class="flex items-center gap-1.5 sm:gap-2 mb-4 sm:mb-6 overflow-x-auto">
+    <button onclick="switchSettingsTab('config')" class="${sTabCls('config')} whitespace-nowrap"><i class="fas fa-key mr-1 sm:mr-1.5"></i>API 密钥</button>
+    <button onclick="switchSettingsTab('audit')" class="${sTabCls('audit')} whitespace-nowrap"><i class="fas fa-clipboard-list mr-1 sm:mr-1.5"></i>审计日志</button>
+    <button onclick="switchSettingsTab('security')" class="${sTabCls('security')} whitespace-nowrap"><i class="fas fa-shield-alt mr-1 sm:mr-1.5"></i>安全</button>
   </div>`;
 
   if (stab === 'config') {
@@ -784,28 +733,28 @@ async function renderAdminConfigSection() {
   const ptabCls = (p) => {
     const active = p === ctab;
     const info = { openai: { bgActive: 'from-emerald-500 to-teal-600' }, anthropic: { bgActive: 'from-orange-500 to-red-500' } };
-    if (active) return `px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r ${info[p].bgActive} shadow-md cursor-default transition-all`;
-    return `px-5 py-2.5 rounded-xl text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} cursor-pointer transition-all`;
+    if (active) return `px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-white bg-gradient-to-r ${info[p].bgActive} shadow-md cursor-default transition-all`;
+    return `px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} cursor-pointer transition-all`;
   };
 
   let html = `<div class="fade-in">`;
 
   // Provider tab switcher (OpenAI / Anthropic in one row)
-  html += `<div class="flex items-center justify-between mb-5">
-    <div class="flex items-center gap-3">
+  html += `<div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-4 sm:mb-5">
+    <div class="flex items-center gap-2 sm:gap-3">
       <button onclick="switchConfigProvider('openai')" class="${ptabCls('openai')}">
-        <i class="fas fa-bolt mr-1.5"></i>OpenAI
+        <i class="fas fa-bolt mr-1"></i>OpenAI
       </button>
       <button onclick="switchConfigProvider('anthropic')" class="${ptabCls('anthropic')}">
-        <i class="fas fa-star mr-1.5"></i>Anthropic
+        <i class="fas fa-star mr-1"></i>Anthropic
       </button>
     </div>
-    <button onclick="batchSaveAllConfigs()" class="${cls.btn()} text-xs"><i class="fas fa-save mr-1"></i>一键保存全部</button>
+    <button onclick="batchSaveAllConfigs()" class="${cls.btn()} text-xs"><i class="fas fa-save mr-1"></i>一键保存</button>
   </div>`;
 
   // Tier cards for current provider
   const provider = ctab;
-  html += `<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">`;
+  html += `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-6">`;
 
   for (const tier of tiers) {
     const key = `${provider}_${tier}`;
@@ -989,7 +938,7 @@ function renderAdminSecuritySection() {
   let html = `<div class="fade-in">
     <div class="${cls.card()} overflow-hidden"><div class="h-1 bg-gradient-to-r from-primary-500 to-primary-600"></div><div class="p-5">
       <h3 class="text-sm font-semibold ${cls.text()} mb-4"><i class="fas fa-lock mr-2"></i>修改密码</h3>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
         <div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-key mr-1"></i>当前密码</label>
           <div class="relative"><input id="pw-current" type="password" placeholder="输入当前密码" class="${cls.input()} w-full pr-9"><button onclick="togglePw('pw-current')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()}"><i class="fas fa-eye text-xs"></i></button></div></div>
         <div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-lock-open mr-1"></i>新密码</label>
@@ -1007,7 +956,7 @@ function renderAdminSecuritySection() {
 }
 
 function renderLoginForm() {
-  return `<div class="flex items-center justify-center min-h-[60vh] fade-in"><div class="${cls.card()} p-8 w-full max-w-md overflow-hidden"><div class="h-1 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-600 -mx-8 -mt-8 mb-6"></div>
+  return `<div class="flex items-center justify-center min-h-[60vh] fade-in px-1"><div class="${cls.card()} p-5 sm:p-8 w-full max-w-md overflow-hidden"><div class="h-1 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-600 -mx-5 sm:-mx-8 -mt-5 sm:-mt-8 mb-5 sm:mb-6"></div>
     <div class="text-center mb-6"><div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center mx-auto mb-4 shadow-lg"><i class="fas fa-shield-alt text-2xl text-white"></i></div><h2 class="text-lg font-semibold ${cls.text()}">管理员登录</h2><p class="${cls.textSub()} text-xs mt-1">请输入凭据以管理系统配置</p></div>
     <div class="space-y-4"><div><label class="text-xs font-medium ${cls.textSub()} mb-1.5 block">用户名</label><div class="relative"><i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-xs ${cls.textMuted()}"></i><input id="login-user" type="text" value="admin" class="${cls.input()} w-full pl-9" placeholder="admin"></div></div>
     <div><label class="text-xs font-medium ${cls.textSub()} mb-1.5 block">密码</label><div class="relative"><i class="fas fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-xs ${cls.textMuted()}"></i><input id="login-pass" type="password" class="${cls.input()} w-full pl-9" placeholder="请输入密码" onkeydown="if(event.key==='Enter')doLogin()"></div></div>
@@ -1103,10 +1052,10 @@ window.showPelicanModal = function(testId) {
 
   const root = document.getElementById('modal-root');
   root.innerHTML = `
-    <div class="fixed inset-0 bg-black/60 backdrop-blur-md z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
-      <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()" style="max-height:90vh;display:flex;flex-direction:column">
-        <div class="flex items-center justify-between px-5 py-3.5 border-b ${d ? 'border-slate-700' : 'border-gray-200'} flex-shrink-0">
-          <h3 class="text-base font-semibold ${cls.text()}">鹈鹕骑行 · 动画预览</h3>
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-md z-[9998] flex items-end sm:items-center justify-center sm:p-4 fade-in" onclick="closeModal()">
+      <div class="w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()" style="max-height:90vh;display:flex;flex-direction:column">
+        <div class="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b ${d ? 'border-slate-700' : 'border-gray-200'} flex-shrink-0">
+          <h3 class="text-sm sm:text-base font-semibold ${cls.text()}">鹈鹕骑行 · 动画预览</h3>
           <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times text-sm"></i></button>
         </div>
         <div class="flex-1 overflow-auto">
@@ -1196,14 +1145,14 @@ async function renderTokenUsage() {
       <div class="h-1 bg-gradient-to-r from-cyan-500 via-primary-500 to-purple-500"></div>
       <div class="p-6">
         <label class="text-xs font-semibold ${cls.textSub()} mb-2 block"><i class="fas fa-key mr-1.5 text-primary-500"></i>API 令牌 Key</label>
-        <div class="flex gap-3">
+        <div class="flex flex-col sm:flex-row gap-2 sm:gap-3">
           <div class="relative flex-1">
             <input id="token-key-input" type="text" value="${lastKey}" placeholder="输入 sk-xxxxxxxxx 格式的令牌密钥"
-              class="${cls.input()} w-full pl-10 pr-4 !py-3 font-mono text-sm"
+              class="${cls.input()} w-full pl-10 pr-4 !py-3 font-mono text-xs sm:text-sm"
               onkeydown="if(event.key==='Enter')doTokenQuery()">
             <i class="fas fa-fingerprint absolute left-3 top-1/2 -translate-y-1/2 text-sm ${cls.textMuted()}"></i>
           </div>
-          <button onclick="doTokenQuery()" class="px-6 py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-primary-500 via-primary-600 to-purple-600 hover:from-primary-600 hover:via-primary-700 hover:to-purple-700 shadow-lg shadow-primary-500/20 transition-all hover:shadow-xl hover:shadow-primary-500/30 hover:-translate-y-0.5 flex items-center gap-2">
+          <button onclick="doTokenQuery()" class="px-6 py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-primary-500 via-primary-600 to-purple-600 hover:from-primary-600 hover:via-primary-700 hover:to-purple-700 shadow-lg shadow-primary-500/20 transition-all hover:shadow-xl hover:shadow-primary-500/30 hover:-translate-y-0.5 flex items-center justify-center gap-2 flex-shrink-0">
             <i class="fas fa-bolt"></i>查询
           </button>
         </div>
@@ -1316,20 +1265,20 @@ function renderTokenUsageResults(ct) {
 
   // Tab styles
   const tabCls = (t) => {
-    if (t === tab) return `px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-sm transition-all`;
-    return `px-4 py-2 rounded-lg text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} transition-all cursor-pointer`;
+    if (t === tab) return `px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-600 shadow-sm transition-all`;
+    return `px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium ${d ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 border border-slate-600/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 border border-gray-200'} transition-all cursor-pointer`;
   };
 
   let html = '';
 
   // Back button + header
-  html += `<div class="flex items-center justify-between mb-5 fade-in">
-    <div class="flex items-center gap-3">
-      <button onclick="tokenUsageStore.data=null;renderTokenUsage()" class="w-9 h-9 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400 border border-slate-700' : 'hover:bg-gray-100 text-gray-500 border border-gray-200'} transition-colors"><i class="fas fa-arrow-left text-sm"></i></button>
-      <div><h2 class="text-lg font-semibold ${cls.text()}"><i class="fas fa-chart-line mr-2 text-primary-500"></i>用量查询结果</h2>
-      <p class="${cls.textMuted()} text-xs mt-0.5">令牌: <span class="font-mono">${info.name || 'Unknown'}</span> · <span class="font-mono">${tokenUsageStore.queryKey.substring(0, 12)}...${tokenUsageStore.queryKey.slice(-4)}</span></p></div>
+  html += `<div class="flex items-center justify-between gap-2 mb-4 sm:mb-5 fade-in">
+    <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+      <button onclick="tokenUsageStore.data=null;renderTokenUsage()" class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${d ? 'hover:bg-slate-700 text-slate-400 border border-slate-700' : 'hover:bg-gray-100 text-gray-500 border border-gray-200'} transition-colors"><i class="fas fa-arrow-left text-sm"></i></button>
+      <div class="min-w-0"><h2 class="text-base sm:text-lg font-semibold ${cls.text()} truncate"><i class="fas fa-chart-line mr-2 text-primary-500"></i>用量查询结果</h2>
+      <p class="${cls.textMuted()} text-[10px] sm:text-xs mt-0.5 truncate">令牌: <span class="font-mono">${info.name || 'Unknown'}</span> · <span class="font-mono">${tokenUsageStore.queryKey.substring(0, 8)}...${tokenUsageStore.queryKey.slice(-4)}</span></p></div>
     </div>
-    <button onclick="doTokenQuery()" class="${cls.btnSec()} text-xs"><i class="fas fa-sync-alt mr-1"></i>刷新</button>
+    <button onclick="doTokenQuery()" class="${cls.btnSec()} text-xs flex-shrink-0"><i class="fas fa-sync-alt mr-1"></i>刷新</button>
   </div>`;
 
   // === 4 Quota Overview Cards ===
@@ -1349,7 +1298,7 @@ function renderTokenUsageResults(ct) {
   // === Token Detail Info (placed right after quota cards/progress) ===
   html += `<div class="${cls.card()} overflow-hidden mb-5 fade-in">
     <div class="px-5 py-3 border-b ${d ? 'border-slate-700' : 'border-gray-100'} flex items-center gap-2"><i class="fas fa-id-card text-primary-500 text-sm"></i><h3 class="text-sm font-semibold ${cls.text()}">令牌详细信息</h3></div>
-    <div class="p-5"><div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
+    <div class="p-4 sm:p-5"><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 text-sm">
       <div><span class="${cls.textMuted()} text-xs block mb-0.5">令牌名称</span><span class="font-medium ${cls.text()} font-mono">${info.name || '-'}</span></div>
       <div><span class="${cls.textMuted()} text-xs block mb-0.5">所属用户</span><span class="font-medium ${cls.text()}">${data.logs.length > 0 ? data.logs[0].username || '-' : '-'}</span></div>
       <div><span class="${cls.textMuted()} text-xs block mb-0.5">所属分组</span><span class="font-medium ${cls.text()}">${data.logs.length > 0 ? data.logs[0].group || '-' : '-'}</span></div>
@@ -1361,10 +1310,10 @@ function renderTokenUsageResults(ct) {
     </div></div>`;
 
   // === 3-Tab Navigation: 用量统计 | 调用日志 | 每日趋势 ===
-  html += `<div class="flex items-center gap-2 mb-5 fade-in">
-    <button onclick="switchTokenTab('stats')" class="${tabCls('stats')}"><i class="fas fa-chart-pie mr-1.5"></i>用量统计</button>
-    <button onclick="switchTokenTab('logs')" class="${tabCls('logs')}"><i class="fas fa-list-alt mr-1.5"></i>调用日志 <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${tab==='logs'?'bg-white/20':'opacity-60'}">${data.total_logs}</span></button>
-    <button onclick="switchTokenTab('trend')" class="${tabCls('trend')}"><i class="fas fa-chart-area mr-1.5"></i>每日趋势</button>
+  html += `<div class="flex items-center gap-1.5 sm:gap-2 mb-4 sm:mb-5 fade-in overflow-x-auto">
+    <button onclick="switchTokenTab('stats')" class="${tabCls('stats')} whitespace-nowrap"><i class="fas fa-chart-pie mr-1 sm:mr-1.5"></i><span class="hidden sm:inline">用量</span>统计</button>
+    <button onclick="switchTokenTab('logs')" class="${tabCls('logs')} whitespace-nowrap"><i class="fas fa-list-alt mr-1 sm:mr-1.5"></i>日志 <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${tab==='logs'?'bg-white/20':'opacity-60'}">${data.total_logs}</span></button>
+    <button onclick="switchTokenTab('trend')" class="${tabCls('trend')} whitespace-nowrap"><i class="fas fa-chart-area mr-1 sm:mr-1.5"></i>趋势</button>
   </div>`;
 
   // Tab content
@@ -1460,29 +1409,34 @@ function renderTokenStatsTab(data, d) {
 
 // Generic pagination renderer shared by stats and logs
 function renderGenericPagination(currentPage, totalPages, total, goFn, jumpId, jumpFn, d) {
-  const btnBase = `px-3 py-2 rounded-lg text-sm font-medium transition-all`;
+  const btnBase = `px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all`;
   const btnActive = `${btnBase} bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-sm`;
   const btnNormal = `${btnBase} ${d ? 'text-slate-300 hover:bg-slate-700 border border-slate-600' : 'text-gray-700 hover:bg-gray-100 border border-gray-300'}`;
   const btnDis = `${btnBase} ${d ? 'text-slate-600 border border-slate-700 cursor-not-allowed' : 'text-gray-300 border border-gray-200 cursor-not-allowed'}`;
 
+  // On mobile, show fewer page buttons
+  const mob = store.isMobile;
   let pages = [1];
-  let start = Math.max(2, currentPage - 2), end = Math.min(totalPages - 1, currentPage + 2);
+  const range = mob ? 1 : 2;
+  let start = Math.max(2, currentPage - range), end = Math.min(totalPages - 1, currentPage + range);
   if (start > 2) pages.push('...');
   for (let i = start; i <= end; i++) pages.push(i);
   if (end < totalPages - 1) pages.push('...');
   if (totalPages > 1) pages.push(totalPages);
 
-  let html = `<div class="flex items-center justify-center gap-2 p-4 border-t ${d ? 'border-slate-700' : 'border-gray-100'} flex-wrap">`;
-  html += `<button onclick="${goFn}(1)" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
+  let html = `<div class="flex items-center justify-center gap-1.5 sm:gap-2 p-3 sm:p-4 border-t ${d ? 'border-slate-700' : 'border-gray-100'} flex-wrap">`;
+  // On mobile, hide first/last buttons, only show prev/next
+  if (!mob) html += `<button onclick="${goFn}(1)" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="首页"><i class="fas fa-angles-left text-xs"></i></button>`;
   html += `<button onclick="${goFn}(${currentPage-1})" ${currentPage===1?'disabled':''} class="${currentPage===1?btnDis:btnNormal}" title="上一页"><i class="fas fa-angle-left text-xs"></i></button>`;
   for (const p of pages) {
-    if (p === '...') html += `<span class="px-2 py-2 text-sm ${cls.textMuted()}">…</span>`;
+    if (p === '...') html += `<span class="px-1.5 py-1.5 text-xs sm:text-sm ${cls.textMuted()}">…</span>`;
     else html += `<button onclick="${goFn}(${p})" class="${p===currentPage?btnActive:btnNormal}">${p}</button>`;
   }
   html += `<button onclick="${goFn}(${currentPage+1})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="下一页"><i class="fas fa-angle-right text-xs"></i></button>`;
-  html += `<button onclick="${goFn}(${totalPages})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
-  html += `<div class="flex items-center gap-2 ml-4"><span class="${cls.textSub()} text-sm">跳至</span><input id="${jumpId}" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')${jumpFn}()"><span class="${cls.textSub()} text-sm">页</span><button onclick="${jumpFn}()" class="${btnNormal} !px-3 !py-1.5">GO</button></div>`;
-  html += `<span class="${cls.textMuted()} text-xs ml-3">共 ${total} 条 / ${totalPages} 页</span>`;
+  if (!mob) html += `<button onclick="${goFn}(${totalPages})" ${currentPage===totalPages?'disabled':''} class="${currentPage===totalPages?btnDis:btnNormal}" title="尾页"><i class="fas fa-angles-right text-xs"></i></button>`;
+  // Jump input: hidden on very small screens
+  html += `<div class="hidden sm:flex items-center gap-2 ml-4"><span class="${cls.textSub()} text-sm">跳至</span><input id="${jumpId}" type="number" min="1" max="${totalPages}" value="${currentPage}" class="${cls.input()} !w-16 !py-1.5 text-center" onkeydown="if(event.key==='Enter')${jumpFn}()"><span class="${cls.textSub()} text-sm">页</span><button onclick="${jumpFn}()" class="${btnNormal} !px-3 !py-1.5">GO</button></div>`;
+  html += `<span class="${cls.textMuted()} text-[10px] sm:text-xs ml-2 sm:ml-3">${currentPage}/${totalPages} · ${total}条</span>`;
   html += `</div>`;
   return html;
 }
@@ -1826,11 +1780,11 @@ window.showLogDetail = function(idx) {
 
   const root = document.getElementById('modal-root');
   root.innerHTML = `
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 fade-in" onclick="closeModal()">
-      <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()" style="max-height:85vh;display:flex;flex-direction:column">
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998] flex items-end sm:items-center justify-center sm:p-4 fade-in" onclick="closeModal()">
+      <div class="w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden ${d ? 'bg-slate-800' : 'bg-white'}" onclick="event.stopPropagation()" style="max-height:90vh;display:flex;flex-direction:column">
         <div class="h-1 bg-gradient-to-r from-cyan-500 via-primary-500 to-purple-500"></div>
-        <div class="flex items-center justify-between px-6 py-4 border-b ${d ? 'border-slate-700' : 'border-gray-200'} flex-shrink-0">
-          <h3 class="text-base font-semibold ${cls.text()}"><i class="fas fa-file-alt mr-2 text-primary-500"></i>调用详情</h3>
+        <div class="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b ${d ? 'border-slate-700' : 'border-gray-200'} flex-shrink-0">
+          <h3 class="text-sm sm:text-base font-semibold ${cls.text()}"><i class="fas fa-file-alt mr-2 text-primary-500"></i>调用详情</h3>
           <button onclick="closeModal()" class="w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors"><i class="fas fa-times"></i></button>
         </div>
         <div class="flex-1 overflow-y-auto p-6 scrollbar-thin">
@@ -1958,7 +1912,7 @@ function renderContactUs() {
       <!-- QQ Card -->
       <div class="${cls.card()} overflow-hidden group hover:shadow-lg transition-all">
         <div class="h-1 bg-gradient-to-r from-blue-400 to-cyan-500"></div>
-        <div class="p-6 text-center">
+        <div class="p-4 sm:p-6 text-center">
           <div class="inline-flex items-center gap-2 mb-4">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center shadow-md">
               <i class="fab fa-qq text-white text-lg"></i>
@@ -1968,12 +1922,12 @@ function renderContactUs() {
               <p class="${cls.textSub()} text-xs">扫码加好友</p>
             </div>
           </div>
-          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-4 inline-block shadow-inner mb-4">
-            <img src="/static/qr-qq.png" alt="QQ 二维码" class="w-52 h-52 object-contain">
+          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-3 sm:p-4 inline-block shadow-inner mb-4">
+            <img src="/static/qr-qq.png" alt="QQ 二维码" class="w-40 h-40 sm:w-52 sm:h-52 object-contain">
           </div>
           <div class="flex items-center justify-center gap-2">
-            <span class="${cls.textMuted()} text-sm">QQ号:</span>
-            <span class="font-mono font-bold text-lg ${cls.text()}">3640113361</span>
+            <span class="${cls.textMuted()} text-xs sm:text-sm">QQ号:</span>
+            <span class="font-mono font-bold text-base sm:text-lg ${cls.text()}">3640113361</span>
             <button onclick="copyToClipboard('3640113361','QQ号')" class="p-1.5 rounded-lg ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors" title="复制QQ号"><i class="fas fa-copy text-xs"></i></button>
           </div>
         </div>
@@ -1982,7 +1936,7 @@ function renderContactUs() {
       <!-- WeChat Card -->
       <div class="${cls.card()} overflow-hidden group hover:shadow-lg transition-all">
         <div class="h-1 bg-gradient-to-r from-green-400 to-emerald-500"></div>
-        <div class="p-6 text-center">
+        <div class="p-4 sm:p-6 text-center">
           <div class="inline-flex items-center gap-2 mb-4">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center shadow-md">
               <i class="fab fa-weixin text-white text-lg"></i>
@@ -1992,12 +1946,12 @@ function renderContactUs() {
               <p class="${cls.textSub()} text-xs">扫码添加好友</p>
             </div>
           </div>
-          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-4 inline-block shadow-inner mb-4">
-            <img src="/static/qr-wechat.png" alt="微信二维码" class="w-52 h-52 object-contain">
+          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-3 sm:p-4 inline-block shadow-inner mb-4">
+            <img src="/static/qr-wechat.png" alt="微信二维码" class="w-40 h-40 sm:w-52 sm:h-52 object-contain">
           </div>
           <div class="flex items-center justify-center gap-2">
-            <span class="${cls.textMuted()} text-sm">微信名:</span>
-            <span class="font-medium text-lg ${cls.text()}">元擎のAI助手</span>
+            <span class="${cls.textMuted()} text-xs sm:text-sm">微信名:</span>
+            <span class="font-medium text-base sm:text-lg ${cls.text()}">元擎のAI助手</span>
           </div>
         </div>
       </div>
@@ -2037,31 +1991,41 @@ const MENU = [
 
 function render() {
   const d = isDark();
+  const mob = store.isMobile;
+  const sOpen = store.sidebarOpen;
+
+  // Desktop: normal sidebar push layout; Mobile: sidebar overlay
+  const sidebarCls = mob
+    ? `mobile-sidebar ${sOpen?'open':'closed'} w-56 ${d?'bg-slate-800 border-slate-700':'bg-white border-gray-200'} border-r flex flex-col shadow-2xl`
+    : `${sOpen?'w-56':'w-0'} transition-all duration-300 flex-shrink-0 ${d?'bg-slate-800 border-slate-700':'bg-white border-gray-200'} border-r flex flex-col overflow-hidden`;
+
   document.getElementById('app').innerHTML = `
+    ${mob ? `<div class="sidebar-overlay ${sOpen?'active':''}" onclick="store.closeSidebarMobile()"></div>` : ''}
     <div class="flex h-screen ${d?'bg-slate-900':'bg-gray-50'}">
-      <aside class="${store.sidebarOpen?'w-56':'w-0'} transition-all duration-300 flex-shrink-0 ${d?'bg-slate-800 border-slate-700':'bg-white border-gray-200'} border-r flex flex-col overflow-hidden" style="min-width:${store.sidebarOpen?'14rem':'0'}">
-        <div class="p-4 flex items-center gap-3 border-b ${d?'border-slate-700':'border-gray-200'}">
+      <aside class="${sidebarCls}" ${!mob?`style="min-width:${sOpen?'14rem':'0'}"`:''}>
+        <div class="p-4 flex items-center gap-3 border-b ${d?'border-slate-700':'border-gray-200'} flex-shrink-0">
           <div class="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 shadow-lg"><img src="/static/logo.png" alt="元擎智算" class="w-full h-full object-cover"></div>
-          <div class="overflow-hidden"><h1 class="text-sm font-bold ${cls.text()} whitespace-nowrap">元擎智算</h1><p class="${cls.textMuted()} text-[10px] whitespace-nowrap">AI Monitoring Platform</p></div>
+          <div class="flex-1 overflow-hidden"><h1 class="text-sm font-bold ${cls.text()} whitespace-nowrap">元擎智算</h1><p class="${cls.textMuted()} text-[10px] whitespace-nowrap">AI Monitoring Platform</p></div>
+          ${mob ? `<button onclick="store.closeSidebarMobile()" class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${d?'hover:bg-slate-700 text-slate-400':'hover:bg-gray-100 text-gray-500'}"><i class="fas fa-times"></i></button>` : ''}
         </div>
         <nav class="flex-1 p-2.5 space-y-1 overflow-y-auto scrollbar-thin">
           ${MENU.map(m => `<button onclick="store.setPage('${m.id}')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${store.currentPage===m.id?(d?'bg-primary-600/20 text-primary-400 font-medium':'bg-primary-50 text-primary-700 font-medium'):(d?'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200':'text-gray-600 hover:bg-gray-100 hover:text-gray-800')}"><i class="${m.icon} w-4 text-center"></i><span>${m.label}</span>${m.id==='admin-settings'?`<i class="fas fa-lock text-[10px] ml-auto ${cls.textMuted()}"></i>`:''}</button>`).join('')}
         </nav>
-        <div class="p-3 border-t ${d?'border-slate-700':'border-gray-200'}"><div class="flex items-center gap-2 text-[10px] ${cls.textMuted()}"><i class="fas fa-shield-alt"></i><span>New API · v2.1</span></div></div>
+        <div class="p-3 border-t ${d?'border-slate-700':'border-gray-200'} safe-bottom"><div class="flex items-center gap-2 text-[10px] ${cls.textMuted()}"><i class="fas fa-shield-alt"></i><span>New API · v2.1</span></div></div>
       </aside>
-      <main class="flex-1 flex flex-col overflow-hidden">
-        <header class="h-14 flex items-center justify-between px-4 border-b ${d?'bg-slate-800/80 border-slate-700':'bg-white/80 border-gray-200'} glass flex-shrink-0">
-          <div class="flex items-center gap-3">
-            <button onclick="store.toggleSidebar()" class="p-2 rounded-lg ${d?'hover:bg-slate-700 text-slate-400':'hover:bg-gray-100 text-gray-500'}"><i class="fas fa-bars"></i></button>
-            <img src="/static/logo.png" alt="元擎智算" class="w-7 h-7 rounded-lg object-cover shadow-sm">
-            <span class="text-sm font-medium ${cls.text()}">${MENU.find(m=>m.id===store.currentPage)?.label||''}</span>
+      <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <header class="h-14 flex items-center justify-between px-3 md:px-4 border-b ${d?'bg-slate-800/80 border-slate-700':'bg-white/80 border-gray-200'} glass flex-shrink-0">
+          <div class="flex items-center gap-2 md:gap-3 min-w-0">
+            <button onclick="store.toggleSidebar()" class="p-2 rounded-lg flex-shrink-0 ${d?'hover:bg-slate-700 text-slate-400':'hover:bg-gray-100 text-gray-500'}"><i class="fas fa-bars"></i></button>
+            <img src="/static/logo.png" alt="元擎智算" class="w-7 h-7 rounded-lg object-cover shadow-sm flex-shrink-0">
+            <span class="text-sm font-medium ${cls.text()} truncate">${MENU.find(m=>m.id===store.currentPage)?.label||''}</span>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
             <button onclick="store.setTheme(isDark()?'light':'dark')" class="w-9 h-9 rounded-lg flex items-center justify-center ${d?'hover:bg-slate-700 text-amber-400':'hover:bg-gray-100 text-gray-500'}" title="切换主题"><i class="fas fa-${d?'sun':'moon'}"></i></button>
-            ${store.token?`<div class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg ${d?'bg-slate-700':'bg-gray-100'}"><i class="fas fa-user-shield text-[10px] ${cls.textMuted()}"></i><span class="text-xs ${cls.textSub()}">admin</span></div>`:''}
+            ${store.token?`<div class="flex items-center gap-1 px-2 py-1.5 rounded-lg ${d?'bg-slate-700':'bg-gray-100'}"><i class="fas fa-user-shield text-[10px] ${cls.textMuted()}"></i><span class="text-xs ${cls.textSub()} hidden sm:inline">admin</span></div>`:''}
           </div>
         </header>
-        <div id="page-content" class="flex-1 overflow-y-auto p-6 scrollbar-thin"></div>
+        <div id="page-content" class="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 scrollbar-thin"></div>
       </main>
     </div>`;
   switch (store.currentPage) {
