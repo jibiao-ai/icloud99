@@ -1892,7 +1892,7 @@ function renderContactUs() {
             </div>
             <div class="flex items-center gap-2">
               <span class="${cls.textMuted()} text-xs min-w-[70px]">监控面板</span>
-              <code class="px-2 py-0.5 rounded text-xs font-mono ${d ? 'bg-slate-700 text-cyan-400' : 'bg-white text-primary-600'} border ${d ? 'border-slate-600' : 'border-primary-200'}">edge.lingsuan.org</code>
+              <code class="px-2 py-0.5 rounded text-xs font-mono ${d ? 'bg-slate-700 text-cyan-400' : 'bg-white text-primary-600'} border ${d ? 'border-slate-600' : 'border-primary-200'}">obs.icloud99.cn</code>
             </div>
             <div class="flex items-center gap-2">
               <span class="${cls.textMuted()} text-xs min-w-[70px]">支持协议</span>
@@ -1908,27 +1908,19 @@ function renderContactUs() {
     </div>
 
     <!-- QR Code Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
       <!-- QQ Card -->
       <div class="${cls.card()} overflow-hidden group hover:shadow-lg transition-all">
         <div class="h-1 bg-gradient-to-r from-blue-400 to-cyan-500"></div>
-        <div class="p-4 sm:p-6 text-center">
-          <div class="inline-flex items-center gap-2 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center shadow-md">
-              <i class="fab fa-qq text-white text-lg"></i>
+        <div class="p-4 sm:p-6 flex flex-col items-center">
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center shadow-md">
+              <i class="fab fa-qq text-white text-sm"></i>
             </div>
-            <div class="text-left">
-              <h3 class="text-base font-bold ${cls.text()}">QQ 联系</h3>
-              <p class="${cls.textSub()} text-xs">扫码加好友</p>
-            </div>
+            <h3 class="text-sm font-bold ${cls.text()}">QQ</h3>
           </div>
-          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-3 sm:p-4 inline-block shadow-inner mb-4">
-            <img src="/static/qr-qq.png" alt="QQ 二维码" class="w-40 h-40 sm:w-52 sm:h-52 object-contain">
-          </div>
-          <div class="flex items-center justify-center gap-2">
-            <span class="${cls.textMuted()} text-xs sm:text-sm">QQ号:</span>
-            <span class="font-mono font-bold text-base sm:text-lg ${cls.text()}">3640113361</span>
-            <button onclick="copyToClipboard('3640113361','QQ号')" class="p-1.5 rounded-lg ${d ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-gray-100 text-gray-500'} transition-colors" title="复制QQ号"><i class="fas fa-copy text-xs"></i></button>
+          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-3 inline-block shadow-inner">
+            <img src="/static/qr-qq.png" alt="QQ 二维码" class="w-44 h-44 sm:w-52 sm:h-52 object-contain">
           </div>
         </div>
       </div>
@@ -1936,30 +1928,18 @@ function renderContactUs() {
       <!-- WeChat Card -->
       <div class="${cls.card()} overflow-hidden group hover:shadow-lg transition-all">
         <div class="h-1 bg-gradient-to-r from-green-400 to-emerald-500"></div>
-        <div class="p-4 sm:p-6 text-center">
-          <div class="inline-flex items-center gap-2 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center shadow-md">
-              <i class="fab fa-weixin text-white text-lg"></i>
+        <div class="p-4 sm:p-6 flex flex-col items-center">
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center shadow-md">
+              <i class="fab fa-weixin text-white text-sm"></i>
             </div>
-            <div class="text-left">
-              <h3 class="text-base font-bold ${cls.text()}">微信联系</h3>
-              <p class="${cls.textSub()} text-xs">扫码添加好友</p>
-            </div>
+            <h3 class="text-sm font-bold ${cls.text()}">微信</h3>
           </div>
-          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-3 sm:p-4 inline-block shadow-inner mb-4">
-            <img src="/static/qr-wechat.png" alt="微信二维码" class="w-40 h-40 sm:w-52 sm:h-52 object-contain">
-          </div>
-          <div class="flex items-center justify-center gap-2">
-            <span class="${cls.textMuted()} text-xs sm:text-sm">微信名:</span>
-            <span class="font-medium text-base sm:text-lg ${cls.text()}">元擎のAI助手</span>
+          <div class="${d ? 'bg-white' : 'bg-gray-50'} rounded-xl p-3 inline-block shadow-inner">
+            <img src="/static/qr-wechat.png" alt="微信二维码" class="w-44 h-44 sm:w-52 sm:h-52 object-contain">
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Footer Note -->
-    <div class="text-center ${cls.textMuted()} text-xs pb-4">
-      <p><i class="fas fa-info-circle mr-1"></i>工作日 9:00 - 22:00 在线，非工作时间请留言，我们会尽快回复。</p>
     </div>
   </div>`;
 
