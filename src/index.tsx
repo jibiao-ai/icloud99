@@ -706,49 +706,92 @@ app.post('/api/admin/cleanup-channels', authMiddleware, async (c) => {
   return c.json({ code: 0, message: `已清理 ${badChannels.length} 个 gpt-image-2 渠道`, data: badChannels.map((c: any) => c.name) })
 })
 
-// ===== Admin: New API User Consumption Stats =====
+// ===== New API Admin Session Helper =====
+async function getNewApiSession(): Promise<{ token: string; url: string } | null> {
+  // Read New API admin config from api_configs (provider='newapi', tier='admin')
+  const config = await queryOne("SELECT * FROM api_configs WHERE provider = 'newapi' AND tier = 'admin'")
+  if (!config) return null
+  try {
+    const cfg = JSON.parse(config.config_json)
+    if (!cfg.url || !cfg.username || !cfg.password) return null
+
+    // Login to New API to get session token
+    const resp = await fetch(cfg.url + '/api/user/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: cfg.username, password: cfg.password }),
+      signal: AbortSignal.timeout(15000)
+    })
+    if (!resp.ok) return null
+    const data: any = await resp.json()
+    if (!data.success && data.message) return null
+    const token = data.data?.token || data.data
+    if (!token) return null
+    return { token: String(token), url: cfg.url }
+  } catch { return null }
+}
+
+// Admin: Save New API admin config
+app.post('/api/admin/newapi-config', authMiddleware, async (c) => {
+  const { url, username, password } = await c.req.json()
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+  const user: any = c.get('user')
+  if (!url || !username || !password) return c.json({ code: -1, message: '请填写完整的 New API URL、用户名和密码' }, 400)
+  const config_json = JSON.stringify({ _type: 'newapi_admin_session', url, username, password })
+  await run(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES ('newapi', 'admin', ?, NOW()) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), updated_at = NOW()`, [config_json])
+  await logAudit('newapi_config_save', `保存 New API 管理员配置 (${url})`, ip, user?.username || 'admin')
+  return c.json({ code: 0, message: '保存成功' })
+})
+
+// Admin: Get New API admin config (masked)
+app.get('/api/admin/newapi-config', authMiddleware, async (c) => {
+  const config = await queryOne("SELECT * FROM api_configs WHERE provider = 'newapi' AND tier = 'admin'")
+  if (!config) return c.json({ code: 0, data: null })
+  try {
+    const cfg = JSON.parse(config.config_json)
+    return c.json({ code: 0, data: { url: cfg.url || '', username: cfg.username || '', has_password: !!cfg.password } })
+  } catch { return c.json({ code: 0, data: null }) }
+})
+
+// Admin: Test New API connection
+app.post('/api/admin/newapi-test', authMiddleware, async (c) => {
+  const session = await getNewApiSession()
+  if (!session) return c.json({ code: -1, message: '连接失败：请检查 New API 的 URL、用户名和密码是否正确' })
+  return c.json({ code: 0, message: '连接成功！已成功登录 New API 管理后台' })
+})
+
+// ===== Admin: User Consumption Stats (via New API admin session) =====
 app.get('/api/admin/user-consumption', authMiddleware, async (c) => {
   try {
-    // Fetch all API configs to get all keys
-    const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
-    const allLogs: any[] = []
-    const fetchedKeys = new Set<string>()
+    const session = await getNewApiSession()
+    if (!session) return c.json({ code: -1, message: '未配置 New API 管理员账号，请在管理设置中配置' })
 
-    for (const config of configs) {
-      try {
-        const cfg = JSON.parse(config.config_json)
-        if (!cfg.key || !cfg.url || fetchedKeys.has(cfg.key)) continue
-        fetchedKeys.add(cfg.key)
-
-        // Fetch logs for this key
-        const resp = await fetch(`${cfg.url}/api/log/token?p=0&page_size=500`, {
-          headers: { 'Authorization': `Bearer ${cfg.key}` },
-          signal: AbortSignal.timeout(30000)
-        })
-        if (!resp.ok) continue
-        const data: any = await resp.json()
-        if (data.success !== false && Array.isArray(data.data)) {
-          for (const log of data.data) {
-            log._source_tier = config.tier
-            log._source_provider = config.provider
-            allLogs.push(log)
-          }
-        }
-      } catch { /* skip failed fetches */ }
+    // Fetch all users
+    const usersResp = await fetch(session.url + '/api/user?p=0&page_size=100', {
+      headers: { 'Authorization': 'Bearer ' + session.token },
+      signal: AbortSignal.timeout(15000)
+    })
+    let allUsers: any[] = []
+    if (usersResp.ok) {
+      const ud: any = await usersResp.json()
+      if (ud.success !== false && Array.isArray(ud.data)) allUsers = ud.data
     }
 
-    // Deduplicate by request_id
-    const seen = new Set<string>()
-    const uniqueLogs = allLogs.filter(l => {
-      if (!l.request_id || seen.has(l.request_id)) return false
-      seen.add(l.request_id)
-      return true
+    // Fetch recent logs (all users)
+    const logsResp = await fetch(session.url + '/api/log/search?keyword=&page=0&per_page=1000&type=0&username=&token_name=&model_name=&start_timestamp=0&end_timestamp=0&channel=0&order=', {
+      headers: { 'Authorization': 'Bearer ' + session.token },
+      signal: AbortSignal.timeout(30000)
     })
+    let allLogs: any[] = []
+    if (logsResp.ok) {
+      const ld: any = await logsResp.json()
+      if (ld.success !== false && Array.isArray(ld.data)) allLogs = ld.data
+    }
 
     // Aggregate by username
     const QUOTA_PER_UNIT = 500000
     const userMap: Record<string, { username: string; totalQuota: number; totalCount: number; models: Record<string, number>; groups: Record<string, number>; latestAt: number }> = {}
-    for (const log of uniqueLogs) {
+    for (const log of allLogs) {
       const uname = log.username || 'unknown'
       if (!userMap[uname]) userMap[uname] = { username: uname, totalQuota: 0, totalCount: 0, models: {}, groups: {}, latestAt: 0 }
       userMap[uname].totalQuota += log.quota || 0
@@ -760,108 +803,85 @@ app.get('/api/admin/user-consumption', authMiddleware, async (c) => {
       if (log.created_at > userMap[uname].latestAt) userMap[uname].latestAt = log.created_at
     }
 
-    // Sort by totalQuota descending
-    const users = Object.values(userMap).sort((a, b) => b.totalQuota - a.totalQuota).map(u => ({
-      ...u,
-      totalAmount: (u.totalQuota / QUOTA_PER_UNIT).toFixed(4),
-      models: Object.entries(u.models).sort((a, b) => b[1] - a[1]).map(([m, q]) => ({ model: m, quota: q, amount: (q / QUOTA_PER_UNIT).toFixed(4) })),
-      groups: Object.entries(u.groups).sort((a, b) => b[1] - a[1]).map(([g, q]) => ({ group: g, quota: q, amount: (q / QUOTA_PER_UNIT).toFixed(4) })),
-    }))
+    // Enrich with user info (quota, balance)
+    const userInfoMap: Record<string, any> = {}
+    for (const u of allUsers) { userInfoMap[u.username] = u }
 
-    const totalQuota = uniqueLogs.reduce((s, l) => s + (l.quota || 0), 0)
+    const users = Object.values(userMap).sort((a, b) => b.totalQuota - a.totalQuota).map(u => {
+      const info = userInfoMap[u.username]
+      return {
+        ...u,
+        totalAmount: (u.totalQuota / QUOTA_PER_UNIT).toFixed(4),
+        balance: info ? (info.quota / QUOTA_PER_UNIT).toFixed(4) : '-',
+        role: info ? (info.role === 100 ? 'admin' : info.role === 10 ? 'user' : 'guest') : '-',
+        models: Object.entries(u.models).sort((a, b) => b[1] - a[1]).map(([m, q]) => ({ model: m, quota: q, amount: (q / QUOTA_PER_UNIT).toFixed(4) })),
+        groups: Object.entries(u.groups).sort((a, b) => b[1] - a[1]).map(([g, q]) => ({ group: g, quota: q, amount: (q / QUOTA_PER_UNIT).toFixed(4) })),
+      }
+    })
 
-    return c.json({ code: 0, data: { users, totalLogs: uniqueLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4), quotaPerUnit: QUOTA_PER_UNIT } })
+    const totalQuota = allLogs.reduce((s: number, l: any) => s + (l.quota || 0), 0)
+    return c.json({ code: 0, data: { users, totalLogs: allLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4), quotaPerUnit: QUOTA_PER_UNIT, registeredUsers: allUsers.length } })
   } catch (e: any) {
     return c.json({ code: -1, message: '查询失败: ' + e.message })
   }
 })
 
-// Admin: User detail logs
+// Admin: User detail logs (via New API admin session)
 app.get('/api/admin/user-consumption/:username', authMiddleware, async (c) => {
   const targetUser = c.req.param('username')
   try {
-    const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
-    const allLogs: any[] = []
-    const fetchedKeys = new Set<string>()
+    const session = await getNewApiSession()
+    if (!session) return c.json({ code: -1, message: '未配置 New API 管理员账号' })
 
-    for (const config of configs) {
-      try {
-        const cfg = JSON.parse(config.config_json)
-        if (!cfg.key || !cfg.url || fetchedKeys.has(cfg.key)) continue
-        fetchedKeys.add(cfg.key)
-        const resp = await fetch(`${cfg.url}/api/log/token?p=0&page_size=1000`, {
-          headers: { 'Authorization': `Bearer ${cfg.key}` },
-          signal: AbortSignal.timeout(30000)
+    const resp = await fetch(session.url + `/api/log/search?keyword=&page=0&per_page=500&type=0&username=${encodeURIComponent(targetUser)}&token_name=&model_name=&start_timestamp=0&end_timestamp=0&channel=0&order=`, {
+      headers: { 'Authorization': 'Bearer ' + session.token },
+      signal: AbortSignal.timeout(30000)
+    })
+    let logs: any[] = []
+    if (resp.ok) {
+      const data: any = await resp.json()
+      if (data.success !== false && Array.isArray(data.data)) {
+        logs = data.data.map((log: any) => {
+          let other: any = {}
+          try { other = JSON.parse(log.other || '{}') } catch {}
+          return { ...log, other_parsed: other }
         })
-        if (!resp.ok) continue
-        const data: any = await resp.json()
-        if (data.success !== false && Array.isArray(data.data)) {
-          for (const log of data.data) {
-            if (log.username === targetUser) {
-              let other: any = {}
-              try { other = JSON.parse(log.other || '{}') } catch {}
-              allLogs.push({ ...log, other_parsed: other })
-            }
-          }
-        }
-      } catch { /* skip */ }
+      }
     }
-
-    // Deduplicate and sort
-    const seen = new Set<string>()
-    const uniqueLogs = allLogs.filter(l => {
-      if (!l.request_id || seen.has(l.request_id)) return false
-      seen.add(l.request_id)
-      return true
-    }).sort((a, b) => b.created_at - a.created_at)
+    logs.sort((a: any, b: any) => b.created_at - a.created_at)
 
     const QUOTA_PER_UNIT = 500000
-    const totalQuota = uniqueLogs.reduce((s, l) => s + (l.quota || 0), 0)
-
-    return c.json({ code: 0, data: { username: targetUser, logs: uniqueLogs, totalLogs: uniqueLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4) } })
+    const totalQuota = logs.reduce((s: number, l: any) => s + (l.quota || 0), 0)
+    return c.json({ code: 0, data: { username: targetUser, logs, totalLogs: logs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4) } })
   } catch (e: any) {
     return c.json({ code: -1, message: '查询失败: ' + e.message })
   }
 })
 
-// Admin: Export user consumption as CSV
+// Admin: Export user consumption as CSV (via New API admin session)
 app.get('/api/admin/user-consumption-export', authMiddleware, async (c) => {
   try {
-    const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
-    const allLogs: any[] = []
-    const fetchedKeys = new Set<string>()
+    const session = await getNewApiSession()
+    if (!session) return c.json({ code: -1, message: '未配置 New API 管理员账号' })
 
-    for (const config of configs) {
-      try {
-        const cfg = JSON.parse(config.config_json)
-        if (!cfg.key || !cfg.url || fetchedKeys.has(cfg.key)) continue
-        fetchedKeys.add(cfg.key)
-        const resp = await fetch(`${cfg.url}/api/log/token?p=0&page_size=2000`, {
-          headers: { 'Authorization': `Bearer ${cfg.key}` },
-          signal: AbortSignal.timeout(30000)
-        })
-        if (!resp.ok) continue
-        const data: any = await resp.json()
-        if (data.success !== false && Array.isArray(data.data)) {
-          allLogs.push(...data.data)
-        }
-      } catch { /* skip */ }
+    const resp = await fetch(session.url + '/api/log/search?keyword=&page=0&per_page=5000&type=0&username=&token_name=&model_name=&start_timestamp=0&end_timestamp=0&channel=0&order=', {
+      headers: { 'Authorization': 'Bearer ' + session.token },
+      signal: AbortSignal.timeout(60000)
+    })
+    let allLogs: any[] = []
+    if (resp.ok) {
+      const data: any = await resp.json()
+      if (data.success !== false && Array.isArray(data.data)) allLogs = data.data
     }
-
-    const seen = new Set<string>()
-    const uniqueLogs = allLogs.filter(l => {
-      if (!l.request_id || seen.has(l.request_id)) return false
-      seen.add(l.request_id)
-      return true
-    }).sort((a, b) => b.created_at - a.created_at)
+    allLogs.sort((a: any, b: any) => b.created_at - a.created_at)
 
     const QUOTA_PER_UNIT = 500000
     const BOM = '\uFEFF'
-    let csv = BOM + '时间,用户,模型,分组,Prompt Tokens,Completion Tokens,费用(元),耗时(秒),IP,Request ID\n'
-    for (const log of uniqueLogs) {
+    let csv = BOM + '时间,用户,模型,分组,令牌名,Prompt Tokens,Completion Tokens,费用(元),耗时(秒),IP,Request ID\n'
+    for (const log of allLogs) {
       const time = new Date(log.created_at * 1000).toISOString().replace('T', ' ').substring(0, 19)
       const cost = (log.quota / QUOTA_PER_UNIT).toFixed(6)
-      csv += `${time},${log.username || ''},${log.model_name || ''},${log.group || ''},${log.prompt_tokens || 0},${log.completion_tokens || 0},${cost},${log.use_time || 0},${log.ip || ''},${log.request_id || ''}\n`
+      csv += `${time},${log.username || ''},${log.model_name || ''},${log.group || ''},${log.token_name || ''},${log.prompt_tokens || 0},${log.completion_tokens || 0},${cost},${log.use_time || 0},${log.ip || ''},${log.request_id || ''}\n`
     }
 
     return new Response(csv, {

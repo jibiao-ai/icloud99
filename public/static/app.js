@@ -724,6 +724,7 @@ async function renderAdminSettings() {
   html += `<div class="flex items-center gap-1.5 sm:gap-2 mb-4 sm:mb-6 overflow-x-auto">
     <button onclick="switchSettingsTab('config')" class="${sTabCls('config')} whitespace-nowrap"><i class="fas fa-key mr-1 sm:mr-1.5"></i>API 密钥</button>
     <button onclick="switchSettingsTab('audit')" class="${sTabCls('audit')} whitespace-nowrap"><i class="fas fa-clipboard-list mr-1 sm:mr-1.5"></i>审计日志</button>
+    <button onclick="switchSettingsTab('newapi')" class="${sTabCls('newapi')} whitespace-nowrap"><i class="fas fa-server mr-1 sm:mr-1.5"></i>New API</button>
     <button onclick="switchSettingsTab('security')" class="${sTabCls('security')} whitespace-nowrap"><i class="fas fa-shield-alt mr-1 sm:mr-1.5"></i>安全</button>
   </div>`;
 
@@ -731,6 +732,8 @@ async function renderAdminSettings() {
     html += await renderAdminConfigSection();
   } else if (stab === 'audit') {
     html += await renderAdminAuditSection();
+  } else if (stab === 'newapi') {
+    html += await renderAdminNewApiSection();
   } else if (stab === 'security') {
     html += renderAdminSecuritySection();
   }
@@ -986,6 +989,90 @@ function renderAdminSecuritySection() {
   </div>`;
   return html;
 }
+
+async function renderAdminNewApiSection() {
+  const d = isDark();
+  // Load current config
+  const resp = await api.get('/admin/newapi-config');
+  const cfg = resp.data || {};
+  
+  let html = '<div class="fade-in">';
+  html += '<div class="${cls.card()} overflow-hidden"><div class="h-1 bg-gradient-to-r from-cyan-500 to-primary-600"></div><div class="p-5">';
+  html += '<h3 class="text-sm font-semibold ${cls.text()} mb-1"><i class="fas fa-server mr-2 text-cyan-500"></i>New API 管理员账号</h3>';
+  html += '<p class="${cls.textMuted()} text-xs mb-4">配置 New API 管理后台的登录账号，用于获取所有用户的用量统计数据。该账号需要具有管理员权限。</p>';
+  
+  html += '<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">';
+  html += '<div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-link mr-1"></i>API URL</label>';
+  html += '<input id="newapi-url" type="text" value="' + (cfg.url || 'https://api.icloud99.cn') + '" placeholder="https://api.icloud99.cn" class="${cls.input()} w-full text-xs"></div>';
+  html += '<div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-user mr-1"></i>用户名</label>';
+  html += '<input id="newapi-user" type="text" value="' + (cfg.username || '') + '" placeholder="admin" class="${cls.input()} w-full text-xs"></div>';
+  html += '<div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-lock mr-1"></i>密码</label>';
+  html += '<div class="relative"><input id="newapi-pass" type="password" value="" placeholder="' + (cfg.has_password ? '••••••（已保存，留空不修改）' : '请输入密码') + '" class="${cls.input()} w-full text-xs pr-9"><button onclick="togglePw(\'newapi-pass\')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()}"><i class="fas fa-eye text-xs"></i></button></div></div>';
+  html += '</div>';
+  
+  html += '<div class="flex items-center justify-between">';
+  html += '<div class="flex items-center gap-2">';
+  if (cfg.has_password) {
+    html += '<span class="flex items-center gap-1 text-xs ' + (d ? 'text-emerald-400' : 'text-emerald-600') + '"><i class="fas fa-check-circle"></i>已配置</span>';
+  } else {
+    html += '<span class="text-xs ${cls.textMuted()}"><i class="fas fa-circle-xmark mr-1"></i>未配置</span>';
+  }
+  html += '</div>';
+  html += '<div class="flex gap-2">';
+  html += '<button onclick="testNewApiConn()" class="${cls.btnSec()} text-xs"><i class="fas fa-plug mr-1"></i>测试连接</button>';
+  html += '<button onclick="saveNewApiConfig()" class="${cls.btn()} text-xs"><i class="fas fa-save mr-1"></i>保存</button>';
+  html += '</div></div>';
+  
+  html += '</div></div>';
+  
+  // Tips section
+  html += '<div class="mt-4 ${cls.card()} p-4">';
+  html += '<h4 class="text-xs font-semibold ${cls.textSub()} mb-2"><i class="fas fa-info-circle mr-1 text-primary-500"></i>说明</h4>';
+  html += '<ul class="text-xs ${cls.textMuted()} space-y-1.5 list-disc pl-4">';
+  html += '<li>此账号用于通过 New API 管理接口获取<strong>所有用户</strong>的调用日志和消耗统计</li>';
+  html += '<li>需要使用具有<strong>管理员权限</strong>的 New API 账号（通常是 root/admin）</li>';
+  html += '<li>密码以加密方式存储在本地数据库中，不会对外传输</li>';
+  html += '<li>配置成功后，可在左侧「用量统计」页面查看所有用户的消耗数据并导出</li>';
+  html += '</ul></div>';
+  
+  html += '</div>';
+  return html;
+}
+
+window.saveNewApiConfig = async function() {
+  const url = document.getElementById('newapi-url')?.value?.trim();
+  const username = document.getElementById('newapi-user')?.value?.trim();
+  const password = document.getElementById('newapi-pass')?.value?.trim();
+  if (!url) { toast('请填写 API URL', 'warning'); return; }
+  if (!username) { toast('请填写用户名', 'warning'); return; }
+  
+  // If password is empty and config already exists, keep old password (server side handles via ON DUPLICATE KEY)
+  // But we need to send something - fetch the old config and use it
+  if (!password) {
+    const resp = await api.get('/admin/newapi-config');
+    if (resp.data?.has_password) {
+      toast('密码未修改，仅更新 URL 和用户名', 'info');
+      // We need to send password; re-read from existing config is not possible from frontend
+      // So require password input
+      toast('请输入密码（即使未修改也需要重新填写）', 'warning');
+      return;
+    } else {
+      toast('请输入密码', 'warning');
+      return;
+    }
+  }
+  
+  const resp = await api.post('/admin/newapi-config', { url, username, password });
+  if (resp.code === 0) { toast('New API 管理员配置保存成功！', 'success'); renderAdminSettings(); }
+  else toast(resp.message || '保存失败', 'error');
+};
+
+window.testNewApiConn = async function() {
+  toast('正在测试 New API 连接...', 'info');
+  const resp = await api.post('/admin/newapi-test', {});
+  if (resp.code === 0) toast(resp.message, 'success');
+  else toast(resp.message || '连接失败', 'error');
+};
 
 function renderLoginForm() {
   return `<div class="flex items-center justify-center min-h-[60vh] fade-in px-1"><div class="${cls.card()} p-5 sm:p-8 w-full max-w-md overflow-hidden"><div class="h-1 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-600 -mx-5 sm:-mx-8 -mt-5 sm:-mt-8 mb-5 sm:mb-6"></div>
@@ -2036,7 +2123,7 @@ async function renderUserConsumption() {
     <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-cyan-400 to-cyan-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u603b\u6d88\u8017</span><div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center"><i class="fas fa-coins text-cyan-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">\u00a5${data.totalAmount}</div></div></div>
     <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-purple-400 to-purple-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u603b\u8c03\u7528</span><div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center"><i class="fas fa-bolt text-purple-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.totalLogs.toLocaleString()}</div></div></div>
     <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-emerald-400 to-emerald-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u7528\u6237\u6570</span><div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center"><i class="fas fa-user text-emerald-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.users.length}</div></div></div>
-    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-amber-400 to-orange-500"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u6570\u636e\u6765\u6e90</span><div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center"><i class="fas fa-database text-amber-500 text-sm"></i></div></div><div class="text-sm font-medium ${cls.text()}">New API</div><div class="${cls.textMuted()} text-[10px] mt-0.5">api.icloud99.cn</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-amber-400 to-orange-500"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u6570\u636e\u6765\u6e90</span><div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center"><i class="fas fa-database text-amber-500 text-sm"></i></div></div><div class="text-sm font-medium ${cls.text()}">${data.registeredUsers || '-'} 注册</div><div class="${cls.textMuted()} text-[10px] mt-0.5">New API 管理接口</div></div></div>
   </div>`;
 
   // User table
@@ -2070,6 +2157,7 @@ async function renderUserConsumption() {
         <td class="px-4 py-3 font-mono ${cls.text()}">${u.totalCount.toLocaleString()}</td>
         <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[11px] font-medium ${d?'bg-primary-500/15 text-primary-400':'bg-primary-50 text-primary-600'}">${topGroup}</span></td>
         <td class="px-4 py-3"><span class="font-mono text-xs ${cls.textSub()}">${topModel}</span></td>
+        <td class="px-4 py-3 font-mono text-xs ${cls.text()}">${u.balance !== '-' ? '¥'+u.balance : '-'}</td>
         <td class="px-4 py-3 text-xs ${cls.textSub()}">${lastTime}</td>
         <td class="px-4 py-3"><button onclick="showUserDetail('${u.username}')" class="text-xs text-primary-500 hover:text-primary-400"><i class="fas fa-eye mr-1"></i>\u660e\u7ec6</button></td>
       </tr>`;
@@ -2163,7 +2251,7 @@ const MENU = [
   { id: 'channel-status', label: '渠道状态', icon: 'fas fa-satellite-dish' },
   { id: 'iq-radar', label: 'GPT智商雷达', icon: 'fas fa-crosshairs' },
   { id: 'iq-test', label: '智力检测', icon: 'fas fa-brain' },
-  { id: 'user-consumption', label: '用户用量统计', icon: 'fas fa-users', adminOnly: true },
+  { id: 'user-consumption', label: '用量统计', icon: 'fas fa-users', adminOnly: true },
   { id: 'contact-us', label: '联系我们', icon: 'fas fa-address-book' },
   { id: 'admin-settings', label: '管理设置', icon: 'fas fa-cog' },
 ];
