@@ -715,6 +715,7 @@ async function renderAdminSettings() {
   let html = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
     <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-cog mr-2 text-primary-500"></i>管理设置</h2><p class="${cls.textSub()} text-[10px] sm:text-xs mt-1">API密钥配置、审计日志、安全设置</p></div>
     <div class="flex gap-2">
+      <button onclick="doCleanupChannels()" class="${cls.btnSec()} text-xs"><i class="fas fa-broom mr-1"></i>清理无效渠道</button>
       <button onclick="doInitSeed()" class="${cls.btnSec()} text-xs"><i class="fas fa-database mr-1"></i>初始化</button>
       <button onclick="store.logout()" class="${cls.btnSec()} text-xs"><i class="fas fa-sign-out-alt mr-1"></i>退出</button>
     </div></div>`;
@@ -1027,6 +1028,14 @@ window.doDeleteConfig = async function(id) {
 window.doInitSeed = async function() {
   showModal('初始化数据', `<div class="space-y-3"><p>此操作将：</p><ul class="list-disc pl-5 space-y-1 text-sm"><li>配置 OpenAI 3组密钥（Lite / Standard / Ultra）</li><li>创建 24 个检测渠道（OpenAI + Anthropic 各12个）</li><li>清空现有渠道和检测数据</li></ul><p class="text-xs ${cls.textMuted()} mt-2">Anthropic 密钥需要手动配置。</p></div>`,
     [{ label: '<i class="fas fa-database mr-1"></i>确认初始化', action: 'doSeed()' }]);
+};
+
+window.doCleanupChannels = async function() {
+  if (!requireLogin('清理')) return;
+  toast('正在清理无效渠道(gpt-image-2)...', 'info');
+  const resp = await api.post('/admin/cleanup-channels', {});
+  if (resp.code === 0) { toast(resp.message, 'success'); store.chChannels = null; }
+  else toast(resp.message || '清理失败', 'error');
 };
 
 window.doSeed = async function() {
@@ -1990,12 +1999,171 @@ window.copyToClipboard = function(text, label) {
   });
 };
 
+// ===== USER CONSUMPTION PAGE (Admin Only) =====
+const ucStore = { data: null, loading: false, detailUser: null, detailData: null };
+
+async function renderUserConsumption() {
+  const ct = document.getElementById('page-content');
+  if (!isLoggedIn()) { ct.innerHTML = `<div class="text-center py-20 fade-in"><i class="fas fa-lock text-4xl ${cls.textMuted()} mb-3"></i><p class="${cls.text()} font-semibold">\u8bf7\u5148\u767b\u5f55\u7ba1\u7406\u5458\u8d26\u53f7</p><button onclick="store.setPage('admin-settings')" class="${cls.btn()} mt-4">\u524d\u5f80\u767b\u5f55</button></div>`; return; }
+
+  if (ucStore.detailUser) { renderUserDetail(); return; }
+
+  const d = isDark();
+  if (!ucStore.data && !ucStore.loading) {
+    ucStore.loading = true;
+    ct.innerHTML = `<div class="flex flex-col items-center justify-center h-64 fade-in"><div class="w-12 h-12 border-3 border-primary-500 border-t-transparent rounded-full animate-spin mb-4"></div><p class="${cls.text()} text-sm">\u6b63\u5728\u4ece New API \u83b7\u53d6\u7528\u6237\u7528\u91cf\u6570\u636e...</p></div>`;
+    try {
+      const resp = await api.get('/admin/user-consumption');
+      ucStore.loading = false;
+      if (resp.code === 0) { ucStore.data = resp.data; } else { toast(resp.message, 'error'); }
+    } catch (e) { ucStore.loading = false; toast('\u67e5\u8be2\u5931\u8d25: ' + e.message, 'error'); }
+  }
+
+  const data = ucStore.data;
+  if (!data) { if (!ucStore.loading) ct.innerHTML = `<div class="text-center py-20 fade-in"><p class="${cls.textSub()}">\u6682\u65e0\u6570\u636e\uff0c\u8bf7\u70b9\u51fb\u5237\u65b0</p><button onclick="ucStore.data=null;renderUserConsumption()" class="${cls.btn()} mt-4"><i class="fas fa-sync-alt mr-1"></i>\u91cd\u65b0\u52a0\u8f7d</button></div>`; return; }
+
+  const QUOTA_PER_UNIT = data.quotaPerUnit || 500000;
+
+  let html = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 fade-in">
+    <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-users mr-2 text-primary-500"></i>\u7528\u6237\u7528\u91cf\u7edf\u8ba1</h2><p class="${cls.textSub()} text-xs mt-1">\u805a\u5408\u6240\u6709\u5206\u7ec4 API Key \u7684\u8c03\u7528\u65e5\u5fd7\uff0c\u6309\u7528\u6237\u7edf\u8ba1\u6d88\u8017</p></div>
+    <div class="flex gap-2">
+      <a href="/api/admin/user-consumption-export" target="_blank" class="${cls.btn()} text-xs !py-2" onclick="event.preventDefault();exportCSV()"><i class="fas fa-file-csv mr-1"></i>\u5bfc\u51faCVS</a>
+      <button onclick="ucStore.data=null;renderUserConsumption()" class="${cls.btnSec()} text-xs !py-2"><i class="fas fa-sync-alt mr-1"></i>\u5237\u65b0</button>
+    </div></div>`;
+
+  // Summary cards
+  html += `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5 fade-in">
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-cyan-400 to-cyan-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u603b\u6d88\u8017</span><div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center"><i class="fas fa-coins text-cyan-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">\u00a5${data.totalAmount}</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-purple-400 to-purple-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u603b\u8c03\u7528</span><div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center"><i class="fas fa-bolt text-purple-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.totalLogs.toLocaleString()}</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-emerald-400 to-emerald-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u7528\u6237\u6570</span><div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center"><i class="fas fa-user text-emerald-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.users.length}</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-amber-400 to-orange-500"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u6570\u636e\u6765\u6e90</span><div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center"><i class="fas fa-database text-amber-500 text-sm"></i></div></div><div class="text-sm font-medium ${cls.text()}">New API</div><div class="${cls.textMuted()} text-[10px] mt-0.5">api.icloud99.cn</div></div></div>
+  </div>`;
+
+  // User table
+  html += `<div class="${cls.card()} overflow-hidden fade-in">
+    <div class="px-5 py-3.5 border-b ${d?'border-slate-700':'border-gray-100'} flex items-center gap-2"><i class="fas fa-table text-primary-500 text-sm"></i><h3 class="text-sm font-semibold ${cls.text()}">\u7528\u6237\u6d88\u8017\u6392\u884c</h3><span class="${cls.textMuted()} text-xs ml-auto">\u6309\u6d88\u8017\u91d1\u989d\u964d\u5e8f</span></div>
+    <div class="overflow-x-auto scrollbar-thin"><table class="w-full text-sm">
+      <thead><tr class="${d?'bg-slate-700/50':'bg-gray-50'} text-left">
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">#</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u7528\u6237</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u6d88\u8017(\u5143)</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u8c03\u7528\u6b21\u6570</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u5e38\u7528\u5206\u7ec4</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u5e38\u7528\u6a21\u578b</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u6700\u8fd1\u6d3b\u52a8</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u64cd\u4f5c</th>
+      </tr></thead><tbody>`;
+
+  if (data.users.length === 0) {
+    html += `<tr><td colspan="8" class="px-4 py-12 text-center ${cls.textMuted()}"><i class="fas fa-inbox text-2xl mb-2 block"></i>\u6682\u65e0\u7528\u6237\u6570\u636e</td></tr>`;
+  } else {
+    data.users.forEach((u, idx) => {
+      const rowBg = idx % 2 === 0 ? '' : (d?'bg-slate-800/30':'bg-gray-50/50');
+      const topGroup = u.groups[0] ? u.groups[0].group : '-';
+      const topModel = u.models[0] ? u.models[0].model : '-';
+      const lastTime = u.latestAt > 0 ? timeAgo(new Date(u.latestAt * 1000).toISOString()) : '-';
+      const pct = data.totalQuota > 0 ? ((u.totalQuota / data.totalQuota) * 100).toFixed(1) : '0';
+      html += `<tr class="${rowBg} hover:${d?'bg-slate-700/40':'bg-primary-50/30'} transition-colors">
+        <td class="px-4 py-3 text-xs font-mono ${cls.textMuted()}">${idx+1}</td>
+        <td class="px-4 py-3"><span class="font-medium ${cls.text()}">${u.username}</span></td>
+        <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="font-mono font-bold ${parseFloat(u.totalAmount)>10?'text-amber-500':cls.text()}">\u00a5${u.totalAmount}</span><span class="${cls.textMuted()} text-[10px]">(${pct}%)</span></div></td>
+        <td class="px-4 py-3 font-mono ${cls.text()}">${u.totalCount.toLocaleString()}</td>
+        <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[11px] font-medium ${d?'bg-primary-500/15 text-primary-400':'bg-primary-50 text-primary-600'}">${topGroup}</span></td>
+        <td class="px-4 py-3"><span class="font-mono text-xs ${cls.textSub()}">${topModel}</span></td>
+        <td class="px-4 py-3 text-xs ${cls.textSub()}">${lastTime}</td>
+        <td class="px-4 py-3"><button onclick="showUserDetail('${u.username}')" class="text-xs text-primary-500 hover:text-primary-400"><i class="fas fa-eye mr-1"></i>\u660e\u7ec6</button></td>
+      </tr>`;
+    });
+  }
+  html += `</tbody></table></div></div>`;
+  ct.innerHTML = html;
+}
+
+window.showUserDetail = async function(username) {
+  ucStore.detailUser = username;
+  ucStore.detailData = null;
+  const ct = document.getElementById('page-content');
+  ct.innerHTML = `<div class="flex flex-col items-center justify-center h-64 fade-in"><div class="w-10 h-10 border-3 border-primary-500 border-t-transparent rounded-full animate-spin mb-3"></div><p class="${cls.text()} text-sm">\u52a0\u8f7d ${username} \u7684\u660e\u7ec6\u6570\u636e...</p></div>`;
+  try {
+    const resp = await api.get(`/admin/user-consumption/${encodeURIComponent(username)}`);
+    if (resp.code === 0) { ucStore.detailData = resp.data; renderUserDetail(); }
+    else { toast(resp.message, 'error'); ucStore.detailUser = null; renderUserConsumption(); }
+  } catch (e) { toast('\u52a0\u8f7d\u5931\u8d25: ' + e.message, 'error'); ucStore.detailUser = null; renderUserConsumption(); }
+};
+
+function renderUserDetail() {
+  const ct = document.getElementById('page-content');
+  const d = isDark();
+  const data = ucStore.detailData;
+  if (!data) return;
+  const QUOTA_PER_UNIT = 500000;
+
+  let html = `<div class="flex items-center gap-3 mb-5 fade-in">
+    <button onclick="ucStore.detailUser=null;ucStore.detailData=null;renderUserConsumption()" class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${d?'hover:bg-slate-700 text-slate-400 border border-slate-700':'hover:bg-gray-100 text-gray-500 border border-gray-200'}"><i class="fas fa-arrow-left text-sm"></i></button>
+    <div><h2 class="text-base font-semibold ${cls.text()}"><i class="fas fa-user mr-2 text-primary-500"></i>${data.username} \u00b7 \u8c03\u7528\u660e\u7ec6</h2>
+    <p class="${cls.textSub()} text-xs mt-0.5">\u5171 ${data.totalLogs} \u6761\u8bb0\u5f55 \u00b7 \u603b\u6d88\u8017 \u00a5${data.totalAmount}</p></div></div>`;
+
+  html += `<div class="${cls.card()} overflow-hidden fade-in"><div class="overflow-x-auto scrollbar-thin"><table class="w-full text-sm">
+    <thead><tr class="${d?'bg-slate-700/50':'bg-gray-50'} text-left">
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u65f6\u95f4</th>
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u6a21\u578b</th>
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u5206\u7ec4</th>
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">Prompt</th>
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">Completion</th>
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u8d39\u7528</th>
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u8017\u65f6</th>
+      <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">IP</th>
+    </tr></thead><tbody>`;
+
+  const logs = data.logs.slice(0, 200); // Show max 200
+  if (logs.length === 0) {
+    html += `<tr><td colspan="8" class="px-4 py-12 text-center ${cls.textMuted()}">\u6682\u65e0\u8bb0\u5f55</td></tr>`;
+  } else {
+    logs.forEach((log, idx) => {
+      const time = new Date(log.created_at * 1000);
+      const timeStr = time.toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      const cost = '\u00a5' + (log.quota / QUOTA_PER_UNIT).toFixed(6);
+      const rowBg = idx % 2 === 0 ? '' : (d?'bg-slate-800/30':'bg-gray-50/50');
+      html += `<tr class="${rowBg} hover:${d?'bg-slate-700/40':'bg-primary-50/30'} transition-colors">
+        <td class="px-4 py-2.5 text-xs font-mono ${cls.textSub()} whitespace-nowrap">${timeStr}</td>
+        <td class="px-4 py-2.5"><span class="px-2 py-0.5 rounded text-[11px] font-mono ${d?'bg-slate-700 text-slate-200':'bg-gray-100 text-gray-800'}">${log.model_name}</span></td>
+        <td class="px-4 py-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] ${d?'bg-primary-500/15 text-primary-400':'bg-primary-50 text-primary-600'}">${log.group||'-'}</span></td>
+        <td class="px-4 py-2.5 text-xs font-mono ${cls.text()}">${(log.prompt_tokens||0).toLocaleString()}</td>
+        <td class="px-4 py-2.5 text-xs font-mono ${cls.text()}">${(log.completion_tokens||0).toLocaleString()}</td>
+        <td class="px-4 py-2.5 text-xs font-mono font-medium ${log.quota>50000?'text-amber-500':cls.text()}">${cost}</td>
+        <td class="px-4 py-2.5 text-xs font-mono ${cls.textSub()}">${log.use_time||0}s</td>
+        <td class="px-4 py-2.5 text-xs font-mono ${cls.textMuted()}">${log.ip||'-'}</td>
+      </tr>`;
+    });
+  }
+  html += `</tbody></table></div></div>`;
+  ct.innerHTML = html;
+}
+
+window.exportCSV = async function() {
+  if (!isLoggedIn()) { toast('\u8bf7\u5148\u767b\u5f55', 'warning'); return; }
+  toast('\u6b63\u5728\u751f\u6210\u5bfc\u51fa\u6587\u4ef6...', 'info');
+  try {
+    const resp = await fetch('/api/admin/user-consumption-export', { headers: { 'Authorization': 'Bearer ' + store.token } });
+    if (!resp.ok) { toast('\u5bfc\u51fa\u5931\u8d25', 'error'); return; }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `user_consumption_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('\u5bfc\u51fa\u6210\u529f\uff01', 'success');
+  } catch (e) { toast('\u5bfc\u51fa\u5931\u8d25: ' + e.message, 'error'); }
+};
+
 // ===== MAIN LAYOUT =====
 const MENU = [
   { id: 'token-usage', label: '用量查询', icon: 'fas fa-chart-line' },
   { id: 'channel-status', label: '渠道状态', icon: 'fas fa-satellite-dish' },
   { id: 'iq-radar', label: 'GPT智商雷达', icon: 'fas fa-crosshairs' },
   { id: 'iq-test', label: '智力检测', icon: 'fas fa-brain' },
+  { id: 'user-consumption', label: '用户用量统计', icon: 'fas fa-users', adminOnly: true },
   { id: 'contact-us', label: '联系我们', icon: 'fas fa-address-book' },
   { id: 'admin-settings', label: '管理设置', icon: 'fas fa-cog' },
 ];
@@ -2020,7 +2188,7 @@ function render() {
           ${mob ? `<button onclick="store.closeSidebarMobile()" class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${d?'hover:bg-slate-700 text-slate-400':'hover:bg-gray-100 text-gray-500'}"><i class="fas fa-times"></i></button>` : ''}
         </div>
         <nav class="flex-1 p-2.5 space-y-1 overflow-y-auto scrollbar-thin">
-          ${MENU.map(m => `<button onclick="store.setPage('${m.id}')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${store.currentPage===m.id?(d?'bg-primary-600/20 text-primary-400 font-medium':'bg-primary-50 text-primary-700 font-medium'):(d?'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200':'text-gray-600 hover:bg-gray-100 hover:text-gray-800')}"><i class="${m.icon} w-4 text-center"></i><span>${m.label}</span>${m.id==='admin-settings'?`<i class="fas fa-lock text-[10px] ml-auto ${cls.textMuted()}"></i>`:''}</button>`).join('')}
+          ${MENU.filter(m => !m.adminOnly || isLoggedIn()).map(m => `<button onclick="store.setPage('${m.id}')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${store.currentPage===m.id?(d?'bg-primary-600/20 text-primary-400 font-medium':'bg-primary-50 text-primary-700 font-medium'):(d?'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200':'text-gray-600 hover:bg-gray-100 hover:text-gray-800')}"><i class="${m.icon} w-4 text-center"></i><span>${m.label}</span>${m.adminOnly?`<i class="fas fa-lock text-[10px] ml-auto ${cls.textMuted()}"></i>`:''}</button>`).join('')}
         </nav>
         <div class="p-3 border-t ${d?'border-slate-700':'border-gray-200'} safe-bottom"><div class="flex items-center gap-2 text-[10px] ${cls.textMuted()}"><i class="fas fa-shield-alt"></i><span>New API · v2.1</span></div></div>
       </aside>
@@ -2045,6 +2213,7 @@ function render() {
     case 'iq-radar': renderIQRadar(); break;
     case 'iq-test': renderIQTest(); break;
     case 'contact-us': renderContactUs(); break;
+    case 'user-consumption': renderUserConsumption(); break;
     case 'admin-settings': renderAdminSettings(); break;
   }
 }

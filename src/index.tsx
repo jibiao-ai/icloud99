@@ -332,18 +332,23 @@ setInterval(runAutoChannelTest, AUTO_TEST_INTERVAL)
 // Run once at startup after 30 seconds
 setTimeout(runAutoChannelTest, 30000)
 
-// ===== Auto IQ Test Cron (2:00 AM - 8:00 AM, every 1 hour, rotate tiers) =====
+// ===== Auto IQ Test Cron (2:00 AM - 8:00 AM CST/UTC+8, every 1 hour, rotate tiers) =====
 const IQ_TIERS = ['lite', 'standard', 'ultra']
 let lastAutoIQTestHour = -1
 
-async function runAutoIQTest() {
+function getCSTHour(): number {
+  // Always use China Standard Time (UTC+8) regardless of server timezone
   const now = new Date()
-  const hour = now.getHours()
+  return (now.getUTCHours() + 8) % 24
+}
+
+async function runAutoIQTest() {
+  const hour = getCSTHour()
   
-  // Only run between 2:00 AM and 8:00 AM (inclusive of 2, exclusive of 8)
+  // Only run between 2:00 AM and 8:00 AM CST (inclusive of 2, exclusive of 8)
   if (hour < 2 || hour >= 8) return
   
-  // Don't run twice in the same hour
+  // Don't run twice in the same CST hour
   if (hour === lastAutoIQTestHour) return
   lastAutoIQTestHour = hour
   
@@ -430,7 +435,7 @@ async function runCandyTest(baseUrl: string, apiKey: string, model: string) {
   } catch (e: any) { return { result: 'degraded', score: 0, rawResponse: `Error: ${e.message}`, reasoningTokens: 0, inputTokens: 0, outputTokens: 0, responseTime: Date.now() - startTime } }
 }
 
-const SVG_PROMPT_EN = `Generate an SVG of a pelican riding a bicycle`
+const SVG_PROMPT_EN = `Generate an SVG of a pelican riding a bicycle. The SVG must include CSS animations to show the pelican pedaling and the bicycle wheels spinning. Make it a fun animated scene with the pelican actively cycling. Use <animate> or CSS @keyframes for smooth continuous animation.`
 
 const IQ_TEST_MODEL = 'gpt-6-astra'
 
@@ -684,6 +689,189 @@ app.post('/api/token-usage/query', async (c) => {
     })
   } catch (e: any) {
     return c.json({ code: -1, message: '查询失败: ' + e.message })
+  }
+})
+
+// ===== Admin: Remove invalid channels (e.g. gpt-image-2) =====
+app.post('/api/admin/cleanup-channels', authMiddleware, async (c) => {
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+  const user: any = c.get('user')
+  // Delete channels with model gpt-image-2 and their test records
+  const badChannels = await query("SELECT id, name, model_id FROM channels WHERE model_id = 'gpt-image-2'")
+  for (const ch of badChannels) {
+    await run('DELETE FROM channel_tests WHERE channel_id = ?', [ch.id])
+    await run('DELETE FROM channels WHERE id = ?', [ch.id])
+  }
+  await logAudit('cleanup_channels', `清理无效渠道: 删除 ${badChannels.length} 个 gpt-image-2 渠道`, ip, user?.username || 'admin')
+  return c.json({ code: 0, message: `已清理 ${badChannels.length} 个 gpt-image-2 渠道`, data: badChannels.map((c: any) => c.name) })
+})
+
+// ===== Admin: New API User Consumption Stats =====
+app.get('/api/admin/user-consumption', authMiddleware, async (c) => {
+  try {
+    // Fetch all API configs to get all keys
+    const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
+    const allLogs: any[] = []
+    const fetchedKeys = new Set<string>()
+
+    for (const config of configs) {
+      try {
+        const cfg = JSON.parse(config.config_json)
+        if (!cfg.key || !cfg.url || fetchedKeys.has(cfg.key)) continue
+        fetchedKeys.add(cfg.key)
+
+        // Fetch logs for this key
+        const resp = await fetch(`${cfg.url}/api/log/token?p=0&page_size=500`, {
+          headers: { 'Authorization': `Bearer ${cfg.key}` },
+          signal: AbortSignal.timeout(30000)
+        })
+        if (!resp.ok) continue
+        const data: any = await resp.json()
+        if (data.success !== false && Array.isArray(data.data)) {
+          for (const log of data.data) {
+            log._source_tier = config.tier
+            log._source_provider = config.provider
+            allLogs.push(log)
+          }
+        }
+      } catch { /* skip failed fetches */ }
+    }
+
+    // Deduplicate by request_id
+    const seen = new Set<string>()
+    const uniqueLogs = allLogs.filter(l => {
+      if (!l.request_id || seen.has(l.request_id)) return false
+      seen.add(l.request_id)
+      return true
+    })
+
+    // Aggregate by username
+    const QUOTA_PER_UNIT = 500000
+    const userMap: Record<string, { username: string; totalQuota: number; totalCount: number; models: Record<string, number>; groups: Record<string, number>; latestAt: number }> = {}
+    for (const log of uniqueLogs) {
+      const uname = log.username || 'unknown'
+      if (!userMap[uname]) userMap[uname] = { username: uname, totalQuota: 0, totalCount: 0, models: {}, groups: {}, latestAt: 0 }
+      userMap[uname].totalQuota += log.quota || 0
+      userMap[uname].totalCount++
+      const model = log.model_name || 'unknown'
+      userMap[uname].models[model] = (userMap[uname].models[model] || 0) + (log.quota || 0)
+      const group = log.group || 'default'
+      userMap[uname].groups[group] = (userMap[uname].groups[group] || 0) + (log.quota || 0)
+      if (log.created_at > userMap[uname].latestAt) userMap[uname].latestAt = log.created_at
+    }
+
+    // Sort by totalQuota descending
+    const users = Object.values(userMap).sort((a, b) => b.totalQuota - a.totalQuota).map(u => ({
+      ...u,
+      totalAmount: (u.totalQuota / QUOTA_PER_UNIT).toFixed(4),
+      models: Object.entries(u.models).sort((a, b) => b[1] - a[1]).map(([m, q]) => ({ model: m, quota: q, amount: (q / QUOTA_PER_UNIT).toFixed(4) })),
+      groups: Object.entries(u.groups).sort((a, b) => b[1] - a[1]).map(([g, q]) => ({ group: g, quota: q, amount: (q / QUOTA_PER_UNIT).toFixed(4) })),
+    }))
+
+    const totalQuota = uniqueLogs.reduce((s, l) => s + (l.quota || 0), 0)
+
+    return c.json({ code: 0, data: { users, totalLogs: uniqueLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4), quotaPerUnit: QUOTA_PER_UNIT } })
+  } catch (e: any) {
+    return c.json({ code: -1, message: '查询失败: ' + e.message })
+  }
+})
+
+// Admin: User detail logs
+app.get('/api/admin/user-consumption/:username', authMiddleware, async (c) => {
+  const targetUser = c.req.param('username')
+  try {
+    const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
+    const allLogs: any[] = []
+    const fetchedKeys = new Set<string>()
+
+    for (const config of configs) {
+      try {
+        const cfg = JSON.parse(config.config_json)
+        if (!cfg.key || !cfg.url || fetchedKeys.has(cfg.key)) continue
+        fetchedKeys.add(cfg.key)
+        const resp = await fetch(`${cfg.url}/api/log/token?p=0&page_size=1000`, {
+          headers: { 'Authorization': `Bearer ${cfg.key}` },
+          signal: AbortSignal.timeout(30000)
+        })
+        if (!resp.ok) continue
+        const data: any = await resp.json()
+        if (data.success !== false && Array.isArray(data.data)) {
+          for (const log of data.data) {
+            if (log.username === targetUser) {
+              let other: any = {}
+              try { other = JSON.parse(log.other || '{}') } catch {}
+              allLogs.push({ ...log, other_parsed: other })
+            }
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    // Deduplicate and sort
+    const seen = new Set<string>()
+    const uniqueLogs = allLogs.filter(l => {
+      if (!l.request_id || seen.has(l.request_id)) return false
+      seen.add(l.request_id)
+      return true
+    }).sort((a, b) => b.created_at - a.created_at)
+
+    const QUOTA_PER_UNIT = 500000
+    const totalQuota = uniqueLogs.reduce((s, l) => s + (l.quota || 0), 0)
+
+    return c.json({ code: 0, data: { username: targetUser, logs: uniqueLogs, totalLogs: uniqueLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4) } })
+  } catch (e: any) {
+    return c.json({ code: -1, message: '查询失败: ' + e.message })
+  }
+})
+
+// Admin: Export user consumption as CSV
+app.get('/api/admin/user-consumption-export', authMiddleware, async (c) => {
+  try {
+    const configs = await query('SELECT * FROM api_configs ORDER BY provider, tier')
+    const allLogs: any[] = []
+    const fetchedKeys = new Set<string>()
+
+    for (const config of configs) {
+      try {
+        const cfg = JSON.parse(config.config_json)
+        if (!cfg.key || !cfg.url || fetchedKeys.has(cfg.key)) continue
+        fetchedKeys.add(cfg.key)
+        const resp = await fetch(`${cfg.url}/api/log/token?p=0&page_size=2000`, {
+          headers: { 'Authorization': `Bearer ${cfg.key}` },
+          signal: AbortSignal.timeout(30000)
+        })
+        if (!resp.ok) continue
+        const data: any = await resp.json()
+        if (data.success !== false && Array.isArray(data.data)) {
+          allLogs.push(...data.data)
+        }
+      } catch { /* skip */ }
+    }
+
+    const seen = new Set<string>()
+    const uniqueLogs = allLogs.filter(l => {
+      if (!l.request_id || seen.has(l.request_id)) return false
+      seen.add(l.request_id)
+      return true
+    }).sort((a, b) => b.created_at - a.created_at)
+
+    const QUOTA_PER_UNIT = 500000
+    const BOM = '\uFEFF'
+    let csv = BOM + '时间,用户,模型,分组,Prompt Tokens,Completion Tokens,费用(元),耗时(秒),IP,Request ID\n'
+    for (const log of uniqueLogs) {
+      const time = new Date(log.created_at * 1000).toISOString().replace('T', ' ').substring(0, 19)
+      const cost = (log.quota / QUOTA_PER_UNIT).toFixed(6)
+      csv += `${time},${log.username || ''},${log.model_name || ''},${log.group || ''},${log.prompt_tokens || 0},${log.completion_tokens || 0},${cost},${log.use_time || 0},${log.ip || ''},${log.request_id || ''}\n`
+    }
+
+    return new Response(csv, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename=user_consumption_${new Date().toISOString().slice(0, 10)}.csv`,
+      }
+    })
+  } catch (e: any) {
+    return c.json({ code: -1, message: '导出失败: ' + e.message })
   }
 })
 
