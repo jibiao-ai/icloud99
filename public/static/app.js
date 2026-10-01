@@ -995,49 +995,62 @@ async function renderAdminNewApiSection() {
   // Load current config
   const resp = await api.get('/admin/newapi-config');
   const cfg = resp.data || {};
-  
-  let html = '<div class="fade-in">';
-  html += '<div class="${cls.card()} overflow-hidden"><div class="h-1 bg-gradient-to-r from-cyan-500 to-primary-600"></div><div class="p-5">';
-  html += '<h3 class="text-sm font-semibold ${cls.text()} mb-1"><i class="fas fa-server mr-2 text-cyan-500"></i>New API 管理员账号</h3>';
-  html += '<p class="${cls.textMuted()} text-xs mb-4">配置 New API 管理后台的登录账号，用于获取所有用户的用量统计数据。该账号需要具有管理员权限。</p>';
-  
-  html += '<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">';
-  html += '<div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-link mr-1"></i>API URL</label>';
-  html += '<input id="newapi-url" type="text" value="' + (cfg.url || 'https://api.icloud99.cn') + '" placeholder="https://api.icloud99.cn" class="${cls.input()} w-full text-xs"></div>';
-  html += '<div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-user mr-1"></i>用户名</label>';
-  html += '<input id="newapi-user" type="text" value="' + (cfg.username || '') + '" placeholder="admin" class="${cls.input()} w-full text-xs"></div>';
-  html += '<div><label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-lock mr-1"></i>密码</label>';
-  html += '<div class="relative"><input id="newapi-pass" type="password" value="" placeholder="' + (cfg.has_password ? '••••••（已保存，留空不修改）' : '请输入密码') + '" class="${cls.input()} w-full text-xs pr-9"><button onclick="togglePw(\'newapi-pass\')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()}"><i class="fas fa-eye text-xs"></i></button></div></div>';
-  html += '</div>';
-  
-  html += '<div class="flex items-center justify-between">';
-  html += '<div class="flex items-center gap-2">';
-  if (cfg.has_password) {
-    html += '<span class="flex items-center gap-1 text-xs ' + (d ? 'text-emerald-400' : 'text-emerald-600') + '"><i class="fas fa-check-circle"></i>已配置</span>';
-  } else {
-    html += '<span class="text-xs ${cls.textMuted()}"><i class="fas fa-circle-xmark mr-1"></i>未配置</span>';
-  }
-  html += '</div>';
-  html += '<div class="flex gap-2">';
-  html += '<button onclick="testNewApiConn()" class="${cls.btnSec()} text-xs"><i class="fas fa-plug mr-1"></i>测试连接</button>';
-  html += '<button onclick="saveNewApiConfig()" class="${cls.btn()} text-xs"><i class="fas fa-save mr-1"></i>保存</button>';
-  html += '</div></div>';
-  
-  html += '</div></div>';
-  
-  // Tips section
-  html += '<div class="mt-4 ${cls.card()} p-4">';
-  html += '<h4 class="text-xs font-semibold ${cls.textSub()} mb-2"><i class="fas fa-info-circle mr-1 text-primary-500"></i>说明</h4>';
-  html += '<ul class="text-xs ${cls.textMuted()} space-y-1.5 list-disc pl-4">';
-  html += '<li>此账号用于通过 New API 管理接口获取<strong>所有用户</strong>的调用日志和消耗统计</li>';
-  html += '<li>需要使用具有<strong>管理员权限</strong>的 New API 账号（通常是 root/admin）</li>';
-  html += '<li>密码以加密方式存储在本地数据库中，不会对外传输</li>';
-  html += '<li>配置成功后，可在左侧「用量统计」页面查看所有用户的消耗数据并导出</li>';
-  html += '</ul></div>';
-  
-  html += '</div>';
+
+  const statusHtml = cfg.has_password
+    ? `<span class="flex items-center gap-1 text-xs ${d ? 'text-emerald-400' : 'text-emerald-600'}"><i class="fas fa-check-circle"></i>已配置</span>`
+    : `<span class="text-xs ${cls.textMuted()}"><i class="fas fa-circle-xmark mr-1"></i>未配置</span>`;
+
+  const pwPlaceholder = cfg.has_password ? '已保存，留空不修改' : '请输入密码';
+  const cfgUrl = (cfg.url || 'https://api.icloud99.cn').replace(/"/g, '&quot;');
+  const cfgUser = (cfg.username || '').replace(/"/g, '&quot;');
+
+  const html = `<div class="fade-in">
+    <div class="${cls.card()} overflow-hidden">
+      <div class="h-1 bg-gradient-to-r from-cyan-500 to-primary-600"></div>
+      <div class="p-5 sm:p-6">
+        <h3 class="text-sm font-semibold ${cls.text()} mb-1"><i class="fas fa-server mr-2 text-cyan-500"></i>New API 管理员账号</h3>
+        <p class="${cls.textMuted()} text-xs mb-5">配置 New API 管理后台的登录账号，用于获取所有用户的用量统计数据。该账号需要具有管理员权限。</p>
+        <div class="space-y-4 mb-5">
+          <div>
+            <label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-link mr-1.5"></i>API URL</label>
+            <input id="newapi-url" type="text" value="${cfgUrl}" placeholder="https://api.icloud99.cn" class="${cls.input()} w-full">
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-user mr-1.5"></i>用户名</label>
+              <input id="newapi-user" type="text" value="${cfgUser}" placeholder="admin" class="${cls.input()} w-full">
+            </div>
+            <div>
+              <label class="text-xs ${cls.textSub()} mb-1.5 block font-medium"><i class="fas fa-lock mr-1.5"></i>密码</label>
+              <div class="relative">
+                <input id="newapi-pass" type="password" value="" placeholder="${pwPlaceholder}" class="${cls.input()} w-full pr-10">
+                <button onclick="togglePw('newapi-pass')" class="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 ${cls.textMuted()} hover:${cls.text()} transition-colors"><i class="fas fa-eye text-sm"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">${statusHtml}</div>
+          <div class="flex gap-2">
+            <button onclick="testNewApiConn()" class="${cls.btnSec()}"><i class="fas fa-plug mr-1.5"></i>测试连接</button>
+            <button onclick="saveNewApiConfig()" class="${cls.btn()}"><i class="fas fa-save mr-1.5"></i>保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mt-4 ${cls.card()} p-4">
+      <h4 class="text-xs font-semibold ${cls.textSub()} mb-2"><i class="fas fa-info-circle mr-1 text-primary-500"></i>说明</h4>
+      <ul class="text-xs ${cls.textMuted()} space-y-1.5 list-disc pl-4">
+        <li>此账号用于通过 New API 管理接口获取<strong>所有用户</strong>的调用日志和消耗统计</li>
+        <li>需要使用具有<strong>管理员权限</strong>的 New API 账号（通常是 root/admin）</li>
+        <li>密码以加密方式存储在本地数据库中，不会对外传输</li>
+        <li>配置成功后，可在左侧「用量统计」页面查看所有用户的消耗数据并导出</li>
+      </ul>
+    </div>
+  </div>`;
   return html;
 }
+
 
 window.saveNewApiConfig = async function() {
   const url = document.getElementById('newapi-url')?.value?.trim();
@@ -1046,23 +1059,22 @@ window.saveNewApiConfig = async function() {
   if (!url) { toast('请填写 API URL', 'warning'); return; }
   if (!username) { toast('请填写用户名', 'warning'); return; }
   
-  // If password is empty and config already exists, keep old password (server side handles via ON DUPLICATE KEY)
-  // But we need to send something - fetch the old config and use it
+  // If password is empty, check if already configured
   if (!password) {
-    const resp = await api.get('/admin/newapi-config');
-    if (resp.data?.has_password) {
-      toast('密码未修改，仅更新 URL 和用户名', 'info');
-      // We need to send password; re-read from existing config is not possible from frontend
-      // So require password input
-      toast('请输入密码（即使未修改也需要重新填写）', 'warning');
-      return;
-    } else {
+    const checkResp = await api.get('/admin/newapi-config');
+    if (!checkResp.data?.has_password) {
       toast('请输入密码', 'warning');
       return;
     }
+    // Password already saved - send special flag to keep old password
   }
   
-  const resp = await api.post('/admin/newapi-config', { url, username, password });
+  const body = { url, username };
+  if (password) body.password = password;
+  // If no password provided but has_password, server will keep old password
+  else body.keep_password = true;
+  
+  const resp = await api.post('/admin/newapi-config', body);
   if (resp.code === 0) { toast('New API 管理员配置保存成功！', 'success'); renderAdminSettings(); }
   else toast(resp.message || '保存失败', 'error');
 };
@@ -2087,62 +2099,93 @@ window.copyToClipboard = function(text, label) {
 };
 
 // ===== USER CONSUMPTION PAGE (Admin Only) =====
-const ucStore = { data: null, loading: false, detailUser: null, detailData: null };
+const ucStore = { data: null, loading: false, detailUser: null, detailData: null, month: '' };
+
+// Get current month in YYYY-MM format (CST/UTC+8)
+function getCurrentMonth() {
+  const now = new Date(Date.now() + 8 * 3600000);
+  return now.toISOString().slice(0, 7);
+}
+// Get list of months for selector (last 12 months)
+function getMonthOptions() {
+  const months = [];
+  const now = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const val = d.toISOString().slice(0, 7);
+    const label = d.getFullYear() + '年' + (d.getMonth() + 1) + '月';
+    months.push({ value: val, label });
+  }
+  return months;
+}
+// Initialize to current month
+ucStore.month = getCurrentMonth();
 
 async function renderUserConsumption() {
   const ct = document.getElementById('page-content');
-  if (!isLoggedIn()) { ct.innerHTML = `<div class="text-center py-20 fade-in"><i class="fas fa-lock text-4xl ${cls.textMuted()} mb-3"></i><p class="${cls.text()} font-semibold">\u8bf7\u5148\u767b\u5f55\u7ba1\u7406\u5458\u8d26\u53f7</p><button onclick="store.setPage('admin-settings')" class="${cls.btn()} mt-4">\u524d\u5f80\u767b\u5f55</button></div>`; return; }
+  if (!isLoggedIn()) { ct.innerHTML = `<div class="text-center py-20 fade-in"><i class="fas fa-lock text-4xl ${cls.textMuted()} mb-3"></i><p class="${cls.text()} font-semibold">请先登录管理员账号</p><button onclick="store.setPage('admin-settings')" class="${cls.btn()} mt-4">前往登录</button></div>`; return; }
 
   if (ucStore.detailUser) { renderUserDetail(); return; }
 
   const d = isDark();
+  const currentMonth = ucStore.month || getCurrentMonth();
+
   if (!ucStore.data && !ucStore.loading) {
     ucStore.loading = true;
-    ct.innerHTML = `<div class="flex flex-col items-center justify-center h-64 fade-in"><div class="w-12 h-12 border-3 border-primary-500 border-t-transparent rounded-full animate-spin mb-4"></div><p class="${cls.text()} text-sm">\u6b63\u5728\u4ece New API \u83b7\u53d6\u7528\u6237\u7528\u91cf\u6570\u636e...</p></div>`;
+    ct.innerHTML = `<div class="flex flex-col items-center justify-center h-64 fade-in"><div class="w-12 h-12 border-3 border-primary-500 border-t-transparent rounded-full animate-spin mb-4"></div><p class="${cls.text()} text-sm">正在从 New API 获取 ${currentMonth} 用户用量数据...</p></div>`;
     try {
-      const resp = await api.get('/admin/user-consumption');
+      const resp = await api.get(`/admin/user-consumption?month=${currentMonth}`);
       ucStore.loading = false;
       if (resp.code === 0) { ucStore.data = resp.data; } else { toast(resp.message, 'error'); }
-    } catch (e) { ucStore.loading = false; toast('\u67e5\u8be2\u5931\u8d25: ' + e.message, 'error'); }
+    } catch (e) { ucStore.loading = false; toast('查询失败: ' + e.message, 'error'); }
   }
 
   const data = ucStore.data;
-  if (!data) { if (!ucStore.loading) ct.innerHTML = `<div class="text-center py-20 fade-in"><p class="${cls.textSub()}">\u6682\u65e0\u6570\u636e\uff0c\u8bf7\u70b9\u51fb\u5237\u65b0</p><button onclick="ucStore.data=null;renderUserConsumption()" class="${cls.btn()} mt-4"><i class="fas fa-sync-alt mr-1"></i>\u91cd\u65b0\u52a0\u8f7d</button></div>`; return; }
+  if (!data) { if (!ucStore.loading) ct.innerHTML = `<div class="text-center py-20 fade-in"><p class="${cls.textSub()}">暂无数据，请点击刷新</p><button onclick="ucStore.data=null;renderUserConsumption()" class="${cls.btn()} mt-4"><i class="fas fa-sync-alt mr-1"></i>重新加载</button></div>`; return; }
 
   const QUOTA_PER_UNIT = data.quotaPerUnit || 500000;
 
+  // Month selector options
+  const monthOpts = getMonthOptions();
+  const monthSelect = monthOpts.map(m => `<option value="${m.value}" ${m.value === currentMonth ? 'selected' : ''}>${m.label}</option>`).join('');
+
   let html = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 fade-in">
-    <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-users mr-2 text-primary-500"></i>\u7528\u6237\u7528\u91cf\u7edf\u8ba1</h2><p class="${cls.textSub()} text-xs mt-1">\u805a\u5408\u6240\u6709\u5206\u7ec4 API Key \u7684\u8c03\u7528\u65e5\u5fd7\uff0c\u6309\u7528\u6237\u7edf\u8ba1\u6d88\u8017</p></div>
-    <div class="flex gap-2">
-      <a href="/api/admin/user-consumption-export" target="_blank" class="${cls.btn()} text-xs !py-2" onclick="event.preventDefault();exportCSV()"><i class="fas fa-file-csv mr-1"></i>\u5bfc\u51faCVS</a>
-      <button onclick="ucStore.data=null;renderUserConsumption()" class="${cls.btnSec()} text-xs !py-2"><i class="fas fa-sync-alt mr-1"></i>\u5237\u65b0</button>
+    <div><h2 class="text-base sm:text-lg font-semibold ${cls.text()}"><i class="fas fa-users mr-2 text-primary-500"></i>用户用量统计</h2><p class="${cls.textSub()} text-xs mt-1">聚合所有分组 API Key 的调用日志，按用户统计消耗</p></div>
+    <div class="flex items-center gap-2 flex-wrap">
+      <select id="uc-month-select" onchange="changeUCMonth(this.value)" class="${cls.input()} text-xs !py-2">
+        ${monthSelect}
+        <option value="" ${currentMonth === '' ? 'selected' : ''}>全部时间</option>
+      </select>
+      <button onclick="exportMonthlyExcel()" class="${cls.btn()} text-xs !py-2"><i class="fas fa-file-excel mr-1"></i>导出月度报表</button>
+      <button onclick="ucStore.data=null;renderUserConsumption()" class="${cls.btnSec()} text-xs !py-2"><i class="fas fa-sync-alt mr-1"></i>刷新</button>
     </div></div>`;
 
   // Summary cards
   html += `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5 fade-in">
-    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-cyan-400 to-cyan-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u603b\u6d88\u8017</span><div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center"><i class="fas fa-coins text-cyan-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">\u00a5${data.totalAmount}</div></div></div>
-    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-purple-400 to-purple-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u603b\u8c03\u7528</span><div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center"><i class="fas fa-bolt text-purple-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.totalLogs.toLocaleString()}</div></div></div>
-    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-emerald-400 to-emerald-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u7528\u6237\u6570</span><div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center"><i class="fas fa-user text-emerald-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.users.length}</div></div></div>
-    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-amber-400 to-orange-500"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">\u6570\u636e\u6765\u6e90</span><div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center"><i class="fas fa-database text-amber-500 text-sm"></i></div></div><div class="text-sm font-medium ${cls.text()}">${data.registeredUsers || '-'} 注册</div><div class="${cls.textMuted()} text-[10px] mt-0.5">New API 管理接口</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-cyan-400 to-cyan-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">总消耗</span><div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center"><i class="fas fa-coins text-cyan-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">\u00a5${data.totalAmount}</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-purple-400 to-purple-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">总调用</span><div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center"><i class="fas fa-bolt text-purple-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.totalLogs.toLocaleString()}</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-emerald-400 to-emerald-600"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">用户数</span><div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center"><i class="fas fa-user text-emerald-500 text-sm"></i></div></div><div class="text-xl font-bold ${cls.text()} font-mono">${data.users.length}</div></div></div>
+    <div class="${cls.card()} overflow-hidden"><div class="h-0.5 bg-gradient-to-r from-amber-400 to-orange-500"></div><div class="p-4"><div class="flex items-center justify-between mb-2"><span class="${cls.textMuted()} text-xs">数据来源</span><div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center"><i class="fas fa-database text-amber-500 text-sm"></i></div></div><div class="text-sm font-medium ${cls.text()}">${data.registeredUsers || '-'} 注册</div><div class="${cls.textMuted()} text-[10px] mt-0.5">New API 管理接口${data.month !== 'all' ? ' · ' + data.month : ''}</div></div></div>
   </div>`;
 
   // User table
   html += `<div class="${cls.card()} overflow-hidden fade-in">
-    <div class="px-5 py-3.5 border-b ${d?'border-slate-700':'border-gray-100'} flex items-center gap-2"><i class="fas fa-table text-primary-500 text-sm"></i><h3 class="text-sm font-semibold ${cls.text()}">\u7528\u6237\u6d88\u8017\u6392\u884c</h3><span class="${cls.textMuted()} text-xs ml-auto">\u6309\u6d88\u8017\u91d1\u989d\u964d\u5e8f</span></div>
+    <div class="px-5 py-3.5 border-b ${d?'border-slate-700':'border-gray-100'} flex items-center gap-2"><i class="fas fa-table text-primary-500 text-sm"></i><h3 class="text-sm font-semibold ${cls.text()}">用户消耗排行</h3><span class="${cls.textMuted()} text-xs ml-auto">按消耗金额降序</span></div>
     <div class="overflow-x-auto scrollbar-thin"><table class="w-full text-sm">
       <thead><tr class="${d?'bg-slate-700/50':'bg-gray-50'} text-left">
         <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">#</th>
-        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u7528\u6237</th>
-        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u6d88\u8017(\u5143)</th>
-        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u8c03\u7528\u6b21\u6570</th>
-        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u5e38\u7528\u5206\u7ec4</th>
-        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u5e38\u7528\u6a21\u578b</th>
-        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u6700\u8fd1\u6d3b\u52a8</th>
-        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">\u64cd\u4f5c</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">用户</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">消耗(元)</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">调用次数</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">常用分组</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">常用模型</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">余额</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">最近活动</th>
+        <th class="px-4 py-3 text-xs font-semibold ${cls.textSub()}">操作</th>
       </tr></thead><tbody>`;
 
   if (data.users.length === 0) {
-    html += `<tr><td colspan="8" class="px-4 py-12 text-center ${cls.textMuted()}"><i class="fas fa-inbox text-2xl mb-2 block"></i>\u6682\u65e0\u7528\u6237\u6570\u636e</td></tr>`;
+    html += `<tr><td colspan="9" class="px-4 py-12 text-center ${cls.textMuted()}"><i class="fas fa-inbox text-2xl mb-2 block"></i>暂无用户数据</td></tr>`;
   } else {
     data.users.forEach((u, idx) => {
       const rowBg = idx % 2 === 0 ? '' : (d?'bg-slate-800/30':'bg-gray-50/50');
@@ -2157,15 +2200,49 @@ async function renderUserConsumption() {
         <td class="px-4 py-3 font-mono ${cls.text()}">${u.totalCount.toLocaleString()}</td>
         <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[11px] font-medium ${d?'bg-primary-500/15 text-primary-400':'bg-primary-50 text-primary-600'}">${topGroup}</span></td>
         <td class="px-4 py-3"><span class="font-mono text-xs ${cls.textSub()}">${topModel}</span></td>
-        <td class="px-4 py-3 font-mono text-xs ${cls.text()}">${u.balance !== '-' ? '¥'+u.balance : '-'}</td>
+        <td class="px-4 py-3 font-mono text-xs ${cls.text()}">${u.balance !== '-' ? '\u00a5'+u.balance : '-'}</td>
         <td class="px-4 py-3 text-xs ${cls.textSub()}">${lastTime}</td>
-        <td class="px-4 py-3"><button onclick="showUserDetail('${u.username}')" class="text-xs text-primary-500 hover:text-primary-400"><i class="fas fa-eye mr-1"></i>\u660e\u7ec6</button></td>
+        <td class="px-4 py-3"><button onclick="showUserDetail('${u.username}')" class="text-xs text-primary-500 hover:text-primary-400"><i class="fas fa-eye mr-1"></i>明细</button></td>
       </tr>`;
     });
   }
   html += `</tbody></table></div></div>`;
   ct.innerHTML = html;
 }
+
+window.changeUCMonth = function(month) {
+  ucStore.month = month;
+  ucStore.data = null;
+  ucStore.detailUser = null;
+  ucStore.detailData = null;
+  renderUserConsumption();
+};
+
+window.exportMonthlyExcel = async function() {
+  if (!isLoggedIn()) { toast('请先登录', 'warning'); return; }
+  const month = ucStore.month;
+  if (!month) { toast('请先选择月份', 'warning'); return; }
+  toast(`正在生成 ${month} 月度报表...`, 'info');
+  try {
+    const resp = await fetch(`/api/admin/user-consumption-export?month=${month}`, {
+      headers: { 'Authorization': 'Bearer ' + store.token }
+    });
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      toast(errData.message || '导出失败', 'error');
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Token报表账单_${month}.xlsx`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('月度报表导出成功！', 'success');
+  } catch (e) { toast('导出失败: ' + e.message, 'error'); }
+};
+
 
 window.showUserDetail = async function(username) {
   ucStore.detailUser = username;

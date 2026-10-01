@@ -707,7 +707,7 @@ app.post('/api/admin/cleanup-channels', authMiddleware, async (c) => {
 })
 
 // ===== New API Admin Session Helper =====
-async function getNewApiSession(): Promise<{ token: string; url: string } | null> {
+async function getNewApiSession(): Promise<{ cookie: string; url: string } | null> {
   // Read New API admin config from api_configs (provider='newapi', tier='admin')
   const config = await queryOne("SELECT * FROM api_configs WHERE provider = 'newapi' AND tier = 'admin'")
   if (!config) return null
@@ -715,29 +715,48 @@ async function getNewApiSession(): Promise<{ token: string; url: string } | null
     const cfg = JSON.parse(config.config_json)
     if (!cfg.url || !cfg.username || !cfg.password) return null
 
-    // Login to New API to get session token
+    // Login to New API to get session cookie
     const resp = await fetch(cfg.url + '/api/user/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: cfg.username, password: cfg.password }),
+      redirect: 'manual',
       signal: AbortSignal.timeout(15000)
     })
     if (!resp.ok) return null
     const data: any = await resp.json()
-    if (!data.success && data.message) return null
-    const token = data.data?.token || data.data
-    if (!token) return null
-    return { token: String(token), url: cfg.url }
+    if (!data.success) return null
+
+    // Extract session cookie from Set-Cookie header
+    const setCookie = resp.headers.get('set-cookie') || ''
+    const sessionMatch = setCookie.match(/session=([^;]+)/)
+    if (!sessionMatch) return null
+
+    return { cookie: `session=${sessionMatch[1]}`, url: cfg.url }
   } catch { return null }
 }
 
 // Admin: Save New API admin config
 app.post('/api/admin/newapi-config', authMiddleware, async (c) => {
-  const { url, username, password } = await c.req.json()
+  const { url, username, password, keep_password } = await c.req.json()
   const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
   const user: any = c.get('user')
-  if (!url || !username || !password) return c.json({ code: -1, message: '请填写完整的 New API URL、用户名和密码' }, 400)
-  const config_json = JSON.stringify({ _type: 'newapi_admin_session', url, username, password })
+  if (!url || !username) return c.json({ code: -1, message: '请填写 New API URL 和用户名' }, 400)
+
+  let finalPassword = password
+  if (!password && keep_password) {
+    // Keep the old password from existing config
+    const existing = await queryOne("SELECT * FROM api_configs WHERE provider = 'newapi' AND tier = 'admin'")
+    if (existing) {
+      try {
+        const oldCfg = JSON.parse(existing.config_json)
+        finalPassword = oldCfg.password
+      } catch {}
+    }
+  }
+  if (!finalPassword) return c.json({ code: -1, message: '请填写密码' }, 400)
+
+  const config_json = JSON.stringify({ _type: 'newapi_admin_session', url, username, password: finalPassword })
   await run(`INSERT INTO api_configs (provider, tier, config_json, updated_at) VALUES ('newapi', 'admin', ?, NOW()) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), updated_at = NOW()`, [config_json])
   await logAudit('newapi_config_save', `保存 New API 管理员配置 (${url})`, ip, user?.username || 'admin')
   return c.json({ code: 0, message: '保存成功' })
@@ -761,14 +780,60 @@ app.post('/api/admin/newapi-test', authMiddleware, async (c) => {
 })
 
 // ===== Admin: User Consumption Stats (via New API admin session) =====
+
+// Helper: fetch ALL logs from New API with pagination for a given time range
+async function fetchAllLogs(session: { cookie: string; url: string }, startTs: number, endTs: number): Promise<any[]> {
+  const allLogs: any[] = []
+  let page = 0
+  const perPage = 500
+  let hasMore = true
+
+  while (hasMore) {
+    try {
+      const logUrl = `${session.url}/api/log/search?keyword=&page=${page}&per_page=${perPage}&type=0&username=&token_name=&model_name=&start_timestamp=${startTs}&end_timestamp=${endTs}&channel=0&order=`
+      const resp = await fetch(logUrl, {
+        headers: { 'Cookie': session.cookie },
+        signal: AbortSignal.timeout(30000)
+      })
+      if (!resp.ok) break
+      const data: any = await resp.json()
+      if (data.success === false || !Array.isArray(data.data)) break
+      allLogs.push(...data.data)
+      // If we got fewer than perPage, no more pages
+      if (data.data.length < perPage) {
+        hasMore = false
+      } else {
+        page++
+        // Safety limit: max 100 pages (50000 records)
+        if (page >= 100) hasMore = false
+      }
+    } catch {
+      break
+    }
+  }
+  return allLogs
+}
+
 app.get('/api/admin/user-consumption', authMiddleware, async (c) => {
   try {
     const session = await getNewApiSession()
     if (!session) return c.json({ code: -1, message: '未配置 New API 管理员账号，请在管理设置中配置' })
 
+    // Support optional month filter: ?month=2026-05
+    const monthParam = c.req.query('month') || ''
+    let startTs = 0, endTs = 0
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      const [year, month] = monthParam.split('-').map(Number)
+      // Use UTC+8 (CST) for month boundaries
+      const startDate = new Date(Date.UTC(year, month - 1, 1) - 8 * 3600000)
+      const endDate = new Date(Date.UTC(year, month, 1) - 8 * 3600000)
+      startTs = Math.floor(startDate.getTime() / 1000)
+      endTs = Math.floor(endDate.getTime() / 1000)
+    }
+
     // Fetch all users
     const usersResp = await fetch(session.url + '/api/user?p=0&page_size=100', {
-      headers: { 'Authorization': 'Bearer ' + session.token },
+      headers: { 'Cookie': session.cookie },
       signal: AbortSignal.timeout(15000)
     })
     let allUsers: any[] = []
@@ -777,16 +842,8 @@ app.get('/api/admin/user-consumption', authMiddleware, async (c) => {
       if (ud.success !== false && Array.isArray(ud.data)) allUsers = ud.data
     }
 
-    // Fetch recent logs (all users)
-    const logsResp = await fetch(session.url + '/api/log/search?keyword=&page=0&per_page=1000&type=0&username=&token_name=&model_name=&start_timestamp=0&end_timestamp=0&channel=0&order=', {
-      headers: { 'Authorization': 'Bearer ' + session.token },
-      signal: AbortSignal.timeout(30000)
-    })
-    let allLogs: any[] = []
-    if (logsResp.ok) {
-      const ld: any = await logsResp.json()
-      if (ld.success !== false && Array.isArray(ld.data)) allLogs = ld.data
-    }
+    // Fetch logs with pagination
+    const allLogs = await fetchAllLogs(session, startTs, endTs)
 
     // Aggregate by username
     const QUOTA_PER_UNIT = 500000
@@ -820,7 +877,7 @@ app.get('/api/admin/user-consumption', authMiddleware, async (c) => {
     })
 
     const totalQuota = allLogs.reduce((s: number, l: any) => s + (l.quota || 0), 0)
-    return c.json({ code: 0, data: { users, totalLogs: allLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4), quotaPerUnit: QUOTA_PER_UNIT, registeredUsers: allUsers.length } })
+    return c.json({ code: 0, data: { users, totalLogs: allLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4), quotaPerUnit: QUOTA_PER_UNIT, registeredUsers: allUsers.length, month: monthParam || 'all' } })
   } catch (e: any) {
     return c.json({ code: -1, message: '查询失败: ' + e.message })
   }
@@ -833,61 +890,203 @@ app.get('/api/admin/user-consumption/:username', authMiddleware, async (c) => {
     const session = await getNewApiSession()
     if (!session) return c.json({ code: -1, message: '未配置 New API 管理员账号' })
 
-    const resp = await fetch(session.url + `/api/log/search?keyword=&page=0&per_page=500&type=0&username=${encodeURIComponent(targetUser)}&token_name=&model_name=&start_timestamp=0&end_timestamp=0&channel=0&order=`, {
-      headers: { 'Authorization': 'Bearer ' + session.token },
-      signal: AbortSignal.timeout(30000)
-    })
-    let logs: any[] = []
-    if (resp.ok) {
-      const data: any = await resp.json()
-      if (data.success !== false && Array.isArray(data.data)) {
-        logs = data.data.map((log: any) => {
+    // Support month filter
+    const monthParam = c.req.query('month') || ''
+    let startTs = 0, endTs = 0
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      const [year, month] = monthParam.split('-').map(Number)
+      const startDate = new Date(Date.UTC(year, month - 1, 1) - 8 * 3600000)
+      const endDate = new Date(Date.UTC(year, month, 1) - 8 * 3600000)
+      startTs = Math.floor(startDate.getTime() / 1000)
+      endTs = Math.floor(endDate.getTime() / 1000)
+    }
+
+    // Paginate through all logs for this user
+    let allLogs: any[] = []
+    let page = 0
+    const perPage = 500
+    let hasMore = true
+    while (hasMore) {
+      try {
+        const resp = await fetch(session.url + `/api/log/search?keyword=&page=${page}&per_page=${perPage}&type=0&username=${encodeURIComponent(targetUser)}&token_name=&model_name=&start_timestamp=${startTs}&end_timestamp=${endTs}&channel=0&order=`, {
+          headers: { 'Cookie': session.cookie },
+          signal: AbortSignal.timeout(30000)
+        })
+        if (!resp.ok) break
+        const data: any = await resp.json()
+        if (data.success === false || !Array.isArray(data.data)) break
+        const logs = data.data.map((log: any) => {
           let other: any = {}
           try { other = JSON.parse(log.other || '{}') } catch {}
           return { ...log, other_parsed: other }
         })
-      }
+        allLogs.push(...logs)
+        if (data.data.length < perPage) hasMore = false
+        else { page++; if (page >= 50) hasMore = false }
+      } catch { break }
     }
-    logs.sort((a: any, b: any) => b.created_at - a.created_at)
+    allLogs.sort((a: any, b: any) => b.created_at - a.created_at)
 
     const QUOTA_PER_UNIT = 500000
-    const totalQuota = logs.reduce((s: number, l: any) => s + (l.quota || 0), 0)
-    return c.json({ code: 0, data: { username: targetUser, logs, totalLogs: logs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4) } })
+    const totalQuota = allLogs.reduce((s: number, l: any) => s + (l.quota || 0), 0)
+    return c.json({ code: 0, data: { username: targetUser, logs: allLogs, totalLogs: allLogs.length, totalQuota, totalAmount: (totalQuota / QUOTA_PER_UNIT).toFixed(4) } })
   } catch (e: any) {
     return c.json({ code: -1, message: '查询失败: ' + e.message })
   }
 })
 
-// Admin: Export user consumption as CSV (via New API admin session)
+// Admin: Export user consumption as Excel (via New API admin session)
+// Generates two sheets: 整体账单 (summary) + X月明细 (detail)
 app.get('/api/admin/user-consumption-export', authMiddleware, async (c) => {
   try {
     const session = await getNewApiSession()
     if (!session) return c.json({ code: -1, message: '未配置 New API 管理员账号' })
 
-    const resp = await fetch(session.url + '/api/log/search?keyword=&page=0&per_page=5000&type=0&username=&token_name=&model_name=&start_timestamp=0&end_timestamp=0&channel=0&order=', {
-      headers: { 'Authorization': 'Bearer ' + session.token },
-      signal: AbortSignal.timeout(60000)
-    })
-    let allLogs: any[] = []
-    if (resp.ok) {
-      const data: any = await resp.json()
-      if (data.success !== false && Array.isArray(data.data)) allLogs = data.data
+    // Require month param: ?month=2026-05
+    const monthParam = c.req.query('month') || ''
+    if (!monthParam || !/^\d{4}-\d{2}$/.test(monthParam)) {
+      return c.json({ code: -1, message: '请指定月份参数，如 ?month=2026-05' })
     }
+
+    const [year, month] = monthParam.split('-').map(Number)
+    const monthLabel = `${month}月`
+    const startDate = new Date(Date.UTC(year, month - 1, 1) - 8 * 3600000)
+    const endDate = new Date(Date.UTC(year, month, 1) - 8 * 3600000)
+    const startTs = Math.floor(startDate.getTime() / 1000)
+    const endTs = Math.floor(endDate.getTime() / 1000)
+
+    // Fetch all users
+    const usersResp = await fetch(session.url + '/api/user?p=0&page_size=100', {
+      headers: { 'Cookie': session.cookie },
+      signal: AbortSignal.timeout(15000)
+    })
+    let allUsers: any[] = []
+    if (usersResp.ok) {
+      const ud: any = await usersResp.json()
+      if (ud.success !== false && Array.isArray(ud.data)) allUsers = ud.data
+    }
+    const userInfoMap: Record<string, any> = {}
+    for (const u of allUsers) { userInfoMap[u.username] = u }
+
+    // Fetch all logs for this month with pagination
+    const allLogs = await fetchAllLogs(session, startTs, endTs)
     allLogs.sort((a: any, b: any) => b.created_at - a.created_at)
 
     const QUOTA_PER_UNIT = 500000
-    const BOM = '\uFEFF'
-    let csv = BOM + '时间,用户,模型,分组,令牌名,Prompt Tokens,Completion Tokens,费用(元),耗时(秒),IP,Request ID\n'
+
+    // Build per-user summary
+    const userSummary: Record<string, { username: string; totalCost: number }> = {}
     for (const log of allLogs) {
-      const time = new Date(log.created_at * 1000).toISOString().replace('T', ' ').substring(0, 19)
-      const cost = (log.quota / QUOTA_PER_UNIT).toFixed(6)
-      csv += `${time},${log.username || ''},${log.model_name || ''},${log.group || ''},${log.token_name || ''},${log.prompt_tokens || 0},${log.completion_tokens || 0},${cost},${log.use_time || 0},${log.ip || ''},${log.request_id || ''}\n`
+      const uname = log.username || 'unknown'
+      if (!userSummary[uname]) userSummary[uname] = { username: uname, totalCost: 0 }
+      userSummary[uname].totalCost += (log.quota || 0) / QUOTA_PER_UNIT
+    }
+    const summaryList = Object.values(userSummary).sort((a, b) => b.totalCost - a.totalCost)
+
+    // Generate Excel workbook
+    const ExcelJS = (await import('exceljs')).default
+    const workbook = new ExcelJS.Workbook()
+
+    // === Sheet 1: 整体账单 ===
+    const sheet1 = workbook.addWorksheet('整体账单')
+    sheet1.columns = [
+      { header: '序号', key: 'idx', width: 8 },
+      { header: '用户', key: 'username', width: 16 },
+      { header: '用户团队', key: 'team', width: 22 },
+      { header: `${String(month).padStart(2, '0')}月消费金额`, key: 'cost', width: 18 },
+      { header: '截止合计费用', key: 'total', width: 18 },
+    ]
+    // Bold header row
+    sheet1.getRow(1).font = { bold: true }
+    sheet1.getRow(1).alignment = { horizontal: 'center' }
+
+    summaryList.forEach((u, idx) => {
+      const rowNum = idx + 2
+      sheet1.addRow({
+        idx: idx + 1,
+        username: u.username,
+        team: userInfoMap[u.username]?.group || '',
+        cost: parseFloat(u.totalCost.toFixed(6)),
+        total: undefined,
+      })
+      // Set formula for cumulative total (sum of all month cost columns)
+      const cell = sheet1.getCell(`E${rowNum}`)
+      cell.value = { formula: `SUM(D${rowNum}:D${rowNum})` }
+    })
+
+    // === Sheet 2: X月明细 ===
+    const sheet2 = workbook.addWorksheet(`${month}月明细`)
+    sheet2.columns = [
+      { header: 'time', key: 'time', width: 22 },
+      { header: 'log_id', key: 'log_id', width: 10 },
+      { header: 'user_id', key: 'user_id', width: 10 },
+      { header: 'username', key: 'username', width: 14 },
+      { header: 'token_name', key: 'token_name', width: 16 },
+      { header: 'group', key: 'group', width: 12 },
+      { header: 'model', key: 'model', width: 18 },
+      { header: 'prompt_tokens', key: 'prompt_tokens', width: 14 },
+      { header: 'completion_tokens', key: 'completion_tokens', width: 16 },
+      { header: 'total_tokens', key: 'total_tokens', width: 14 },
+      { header: 'quota', key: 'quota', width: 12 },
+      { header: 'cost_usd', key: 'cost_usd', width: 12 },
+      { header: 'log_type', key: 'log_type', width: 10 },
+      { header: 'channel', key: 'channel', width: 10 },
+      { header: 'channel_name', key: 'channel_name', width: 14 },
+      { header: 'request_id', key: 'request_id', width: 38 },
+      { header: 'upstream_request_id', key: 'upstream_request_id', width: 20 },
+      { header: 'use_time', key: 'use_time', width: 10 },
+      { header: 'is_stream', key: 'is_stream', width: 10 },
+      { header: 'ip', key: 'ip', width: 16 },
+      { header: 'content', key: 'content', width: 20 },
+    ]
+    sheet2.getRow(1).font = { bold: true }
+
+    for (const log of allLogs) {
+      const time = new Date(log.created_at * 1000)
+      // Format to CST (UTC+8)
+      const cstTime = new Date(time.getTime() + 8 * 3600000)
+      const timeStr = cstTime.toISOString().replace('T', ' ').substring(0, 19)
+      const promptTokens = log.prompt_tokens || 0
+      const completionTokens = log.completion_tokens || 0
+      const quota = log.quota || 0
+      const costUsd = quota / QUOTA_PER_UNIT
+
+      sheet2.addRow({
+        time: timeStr,
+        log_id: log.id || '',
+        user_id: log.user_id || '',
+        username: log.username || '',
+        token_name: log.token_name || '',
+        group: log.group || '',
+        model: log.model_name || '',
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+        quota: quota,
+        cost_usd: parseFloat(costUsd.toFixed(6)),
+        log_type: log.type || '',
+        channel: log.channel || '',
+        channel_name: log.channel_name || '',
+        request_id: log.request_id || '',
+        upstream_request_id: '',
+        use_time: log.use_time || 0,
+        is_stream: log.is_stream ? true : false,
+        ip: log.ip || '',
+        content: log.content || '',
+      })
     }
 
-    return new Response(csv, {
+    // Write to buffer
+    const buffer = await workbook.xlsx.writeBuffer()
+
+    const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || ''
+    const user: any = c.get('user')
+    await logAudit('consumption_export', `导出 ${monthParam} 月度账单 (${allLogs.length} 条记录)`, ip, user?.username || 'admin')
+
+    return new Response(buffer as ArrayBuffer, {
       headers: {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename=user_consumption_${new Date().toISOString().slice(0, 10)}.csv`,
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename=Token_Report_${monthParam}.xlsx`,
       }
     })
   } catch (e: any) {
