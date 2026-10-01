@@ -728,11 +728,22 @@ async function getNewApiSession(): Promise<{ cookie: string; url: string } | nul
     if (!data.success) return null
 
     // Extract session cookie from Set-Cookie header
-    const setCookie = resp.headers.get('set-cookie') || ''
-    const sessionMatch = setCookie.match(/session=([^;]+)/)
-    if (!sessionMatch) return null
+    // Node.js fetch: use getSetCookie() for multiple Set-Cookie headers
+    const setCookies = (resp.headers as any).getSetCookie?.() || []
+    let sessionValue = ''
+    for (const sc of setCookies) {
+      const m = sc.match(/session=([^;]+)/)
+      if (m) { sessionValue = m[1]; break }
+    }
+    // Fallback: try get('set-cookie') for single header
+    if (!sessionValue) {
+      const sc = resp.headers.get('set-cookie') || ''
+      const m = sc.match(/session=([^;]+)/)
+      if (m) sessionValue = m[1]
+    }
+    if (!sessionValue) return null
 
-    return { cookie: `session=${sessionMatch[1]}`, url: cfg.url }
+    return { cookie: `session=${sessionValue}`, url: cfg.url }
   } catch { return null }
 }
 
