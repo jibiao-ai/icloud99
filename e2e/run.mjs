@@ -303,6 +303,10 @@ try {
   check(await page.getByText('管理员登录').first().isVisible(), '退出后回到登录表单');
   await go('/usage');
   check(await page.getByText('需要管理员权限').isVisible(), '匿名访问 /usage 显示无权限引导');
+  // 联系我们：匿名访客也应看到「令牌查询的 New API 地址」作为 API 域名
+  await go('/contact');
+  const apiRow = await page.locator('dt', { hasText: 'API 域名' }).locator('xpath=..').innerText();
+  check(apiRow.includes('127.0.0.1:4010') && !apiRow.includes('未配置'), `联系我们 API 域名引用令牌查询地址：${apiRow.replace(/\s+/g, ' ')}`);
 } catch (e) {
   fail(`未捕获异常：${e.message.split('\n')[0]}`);
   await shot('zz-failure').catch(() => {});

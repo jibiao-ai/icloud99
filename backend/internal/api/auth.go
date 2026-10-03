@@ -22,12 +22,19 @@ func (s *Server) portalInfo(w http.ResponseWriter, r *http.Request, _ *auth.Prin
 	if err != nil {
 		return err
 	}
+	httpx.OK(w, publicPortal(st))
+	return nil
+}
+
+// publicPortalKeys 匿名可见的站点信息白名单；token_base_url 是对外 API 域名（联系我们页展示）。
+var publicPortalKeys = []string{"site.name", "site.primary_color", "site.quota_per_unit", "site.currency_symbol", "radar.url", "site.token_base_url"}
+
+func publicPortal(st map[string]string) map[string]string {
 	pub := map[string]string{}
-	for _, k := range []string{"site.name", "site.primary_color", "site.quota_per_unit", "site.currency_symbol", "radar.url"} {
+	for _, k := range publicPortalKeys {
 		pub[k] = st[k]
 	}
-	httpx.OK(w, pub)
-	return nil
+	return pub
 }
 
 type loginReq struct {
