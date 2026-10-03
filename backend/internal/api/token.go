@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,13 @@ func (s *Server) tokenQuery(w http.ResponseWriter, r *http.Request, p *auth.Prin
 	}
 	info, err := s.fetchJSON(r.Context(), base+"/api/usage/token/", in.Key, 15*time.Second)
 	if err != nil {
+		var ue *upstreamError
+		if errors.As(err, &ue) && ue.Status == http.StatusTooManyRequests {
+			return httpx.Err(http.StatusTooManyRequests, ue.Msg)
+		}
+		if errors.As(err, &ue) {
+			return httpx.Err(http.StatusBadGateway, ue.Msg)
+		}
 		return httpx.Err(http.StatusBadGateway, "无法连接令牌服务: "+err.Error())
 	}
 	if ok, _ := info["code"].(bool); !ok {
@@ -61,6 +70,14 @@ func (s *Server) tokenQuery(w http.ResponseWriter, r *http.Request, p *auth.Prin
 	return nil
 }
 
+// upstreamError 上游返回了非预期的 HTTP 状态；Status 供调用方映射为友好提示。
+type upstreamError struct {
+	Status int
+	Msg    string
+}
+
+func (e *upstreamError) Error() string { return e.Msg }
+
 func (s *Server) fetchJSON(ctx context.Context, url, key string, timeout time.Duration) (map[string]any, error) {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -73,8 +90,22 @@ func (s *Server) fetchJSON(ctx context.Context, url, key string, timeout time.Du
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
+	if len(strings.TrimSpace(string(raw))) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			if resp.StatusCode >= 400 {
+				return nil, &upstreamError{Status: resp.StatusCode, Msg: "上游服务返回异常（HTTP " + strconv.Itoa(resp.StatusCode) + "）"}
+			}
+			return nil, &upstreamError{Status: resp.StatusCode, Msg: "上游服务返回了无法解析的内容（HTTP " + strconv.Itoa(resp.StatusCode) + "）"}
+		}
+		return out, nil
 	}
-	return out, nil
+	// 空响应体：按状态码给出明确原因（上游限流时即为 429 + 空体）
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return nil, &upstreamError{Status: 429, Msg: "查询过于频繁，已被上游限流，请稍后（约 1 分钟）再试"}
+	case resp.StatusCode >= 500:
+		return nil, &upstreamError{Status: resp.StatusCode, Msg: "上游服务暂时不可用（HTTP " + strconv.Itoa(resp.StatusCode) + "），请稍后再试"}
+	default:
+		return nil, &upstreamError{Status: resp.StatusCode, Msg: "上游服务返回空响应（HTTP " + strconv.Itoa(resp.StatusCode) + "）"}
+	}
 }
