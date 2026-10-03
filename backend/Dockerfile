@@ -1,6 +1,9 @@
 # ===== build =====
 FROM golang:1.22-alpine AS build
 WORKDIR /src
+# 国内服务器无法直连 proxy.golang.org，默认使用 goproxy.cn；可用 --build-arg GOPROXY=... 覆盖
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
