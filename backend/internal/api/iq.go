@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/bootstrap"
-	"cloudwatch/internal/httpx"
-	"cloudwatch/internal/iq"
-	"cloudwatch/internal/store"
+	"icloud99/internal/auth"
+	"icloud99/internal/bootstrap"
+	"icloud99/internal/httpx"
+	"icloud99/internal/iq"
+	"icloud99/internal/store"
 )
 
 type iqRow struct {

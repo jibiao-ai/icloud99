@@ -1,4 +1,4 @@
-// 元擎智算可视化后端入口。仅读取 CW_ADDR / CW_DB_DSN / CW_SECRET_KEY / CW_ADMIN_PASSWORD 四个启动引导变量。
+// 元擎智算可视化后端入口。仅读取 ICLOUD99_ADDR / ICLOUD99_DB_DSN / ICLOUD99_SECRET_KEY / ICLOUD99_ADMIN_PASSWORD 四个启动引导变量。
 package main
 
 import (
@@ -9,17 +9,17 @@ import (
 	"syscall"
 	"time"
 
-	"cloudwatch/internal/api"
-	"cloudwatch/internal/audit"
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/bootstrap"
-	"cloudwatch/internal/config"
-	"cloudwatch/internal/db"
-	"cloudwatch/internal/monitor"
-	"cloudwatch/internal/newapi"
-	"cloudwatch/internal/secret"
-	"cloudwatch/internal/store"
-	"cloudwatch/internal/usage"
+	"icloud99/internal/api"
+	"icloud99/internal/audit"
+	"icloud99/internal/auth"
+	"icloud99/internal/bootstrap"
+	"icloud99/internal/config"
+	"icloud99/internal/db"
+	"icloud99/internal/monitor"
+	"icloud99/internal/newapi"
+	"icloud99/internal/secret"
+	"icloud99/internal/store"
+	"icloud99/internal/usage"
 )
 
 func main() {

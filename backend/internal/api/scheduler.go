@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"cloudwatch/internal/iq"
-	"cloudwatch/internal/monitor"
+	"icloud99/internal/iq"
+	"icloud99/internal/monitor"
 )
 
 // StartScheduler 启动后台调度：定时渠道检测、智力自动检测、历史清理。参数均来自页面可配置的 settings。

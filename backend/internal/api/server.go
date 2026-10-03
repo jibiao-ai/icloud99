@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"cloudwatch/internal/audit"
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/httpx"
-	"cloudwatch/internal/monitor"
-	"cloudwatch/internal/newapi"
-	"cloudwatch/internal/store"
-	"cloudwatch/internal/usage"
+	"icloud99/internal/audit"
+	"icloud99/internal/auth"
+	"icloud99/internal/httpx"
+	"icloud99/internal/monitor"
+	"icloud99/internal/newapi"
+	"icloud99/internal/store"
+	"icloud99/internal/usage"
 
 	"database/sql"
 )

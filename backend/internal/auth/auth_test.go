@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"cloudwatch/internal/perm"
+	"icloud99/internal/perm"
 )
 
 func TestTokenRoundTrip(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"errors"
 	"strconv"
 
-	"cloudwatch/internal/newapi"
-	"cloudwatch/internal/secret"
+	"icloud99/internal/newapi"
+	"icloud99/internal/secret"
 )
 
 // Store 配置存取。

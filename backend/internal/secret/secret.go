@@ -18,9 +18,9 @@ const Mask = "******"
 // Box 用主密钥派生 AES-256 密钥。
 type Box struct{ aead cipher.AEAD }
 
-// New 由 CW_SECRET_KEY 派生加密盒。
+// New 由 ICLOUD99_SECRET_KEY 派生加密盒。
 func New(master string) (*Box, error) {
-	sum := sha256.Sum256([]byte("cloudwatch/secret/v1|" + master))
+	sum := sha256.Sum256([]byte("icloud99/secret/v1|" + master))
 	blk, err := aes.NewCipher(sum[:])
 	if err != nil {
 		return nil, err

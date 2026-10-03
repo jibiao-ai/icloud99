@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"cloudwatch/internal/newapi"
+	"icloud99/internal/newapi"
 )
 
 func TestParsePeriod(t *testing.T) {

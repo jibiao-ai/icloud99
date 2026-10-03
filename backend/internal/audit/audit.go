@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"cloudwatch/internal/secret"
+	"icloud99/internal/secret"
 )
 
 // Entry 一条审计记录。

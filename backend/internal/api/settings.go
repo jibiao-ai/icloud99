@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/httpx"
-	"cloudwatch/internal/iq"
-	"cloudwatch/internal/secret"
-	"cloudwatch/internal/store"
+	"icloud99/internal/auth"
+	"icloud99/internal/httpx"
+	"icloud99/internal/iq"
+	"icloud99/internal/secret"
+	"icloud99/internal/store"
 )
 
 // settingSpec 可由页面修改的系统参数及其校验。

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/httpx"
-	"cloudwatch/internal/tokenq"
+	"icloud99/internal/auth"
+	"icloud99/internal/httpx"
+	"icloud99/internal/tokenq"
 )
 
 // tokenQuery 用访客自带的令牌 Key 查询额度与日志；Key 仅用于本次请求转发，不落库、不进审计。

@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/bootstrap"
-	"cloudwatch/internal/httpx"
-	"cloudwatch/internal/monitor"
+	"icloud99/internal/auth"
+	"icloud99/internal/bootstrap"
+	"icloud99/internal/httpx"
+	"icloud99/internal/monitor"
 )
 
 const (

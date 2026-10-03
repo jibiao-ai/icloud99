@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"cloudwatch/internal/perm"
+	"icloud99/internal/perm"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -70,7 +70,7 @@ type Signer struct{ key []byte }
 
 // NewSigner 创建签名器。
 func NewSigner(master string) *Signer {
-	sum := sha256.Sum256([]byte("cloudwatch/jwt/v1|" + master))
+	sum := sha256.Sum256([]byte("icloud99/jwt/v1|" + master))
 	return &Signer{key: sum[:]}
 }
 

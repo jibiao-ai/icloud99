@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/httpx"
-	"cloudwatch/internal/perm"
+	"icloud99/internal/auth"
+	"icloud99/internal/httpx"
+	"icloud99/internal/perm"
 )
 
 const tokenTTL = 24 * time.Hour
 
 // dummyHash 用户不存在时仍做一次真实 bcrypt 比较，抹平耗时差异（防用户名枚举）。
-var dummyHash, _ = auth.HashPassword("cloudwatch-dummy-password")
+var dummyHash, _ = auth.HashPassword("icloud99-dummy-password")
 
 func (s *Server) portalInfo(w http.ResponseWriter, r *http.Request, _ *auth.Principal) error {
 	st, err := s.Store.AllSettings(r.Context())

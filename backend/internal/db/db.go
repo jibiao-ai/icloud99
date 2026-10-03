@@ -20,7 +20,7 @@ var migrationFS embed.FS
 func Open(dsn string) (*sql.DB, error) {
 	cfg, err := mysql.ParseDSN(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("解析 CW_DB_DSN 失败: %w", err)
+		return nil, fmt.Errorf("解析 ICLOUD99_DB_DSN 失败: %w", err)
 	}
 	cfg.ParseTime = true
 	cfg.Loc = time.UTC

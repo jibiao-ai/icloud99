@@ -10,8 +10,8 @@ import (
 	"log"
 	"strings"
 
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/secret"
+	"icloud99/internal/auth"
+	"icloud99/internal/secret"
 )
 
 // legacyPlaceholder 旧版 init.sql 内置的占位哈希（旧代码实际接受固定口令，必须强制重置）。

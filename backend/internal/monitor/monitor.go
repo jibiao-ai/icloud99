@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"cloudwatch/internal/store"
+	"icloud99/internal/store"
 )
 
 // Speed 速度评级。

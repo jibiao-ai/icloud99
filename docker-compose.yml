@@ -1,46 +1,47 @@
-# 元擎智算可视化：cloudwatch-web (nginx :3000) → cloudwatch-backend (Go :8080) → cloudwatch-db (MariaDB)
+# 元擎智算可视化：icloud99-web (nginx :80) → icloud99-backend (Go :8080) → icloud99-db (MariaDB)
 # 启动前复制 .env.example 为 .env 并填写 4 个引导变量以及数据库口令；其余业务参数全部在页面「管理设置」中录入。
+name: icloud99
 services:
-  cloudwatch-db:
+  icloud99-db:
     image: mariadb:11
-    container_name: cloudwatch-db
+    container_name: icloud99-db
     restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: ${CW_DB_ROOT_PASSWORD:?请在 .env 中设置 CW_DB_ROOT_PASSWORD}
-      MARIADB_DATABASE: cloudwatch
-      MARIADB_USER: cloudwatch
-      MARIADB_PASSWORD: ${CW_DB_PASSWORD:?请在 .env 中设置 CW_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${ICLOUD99_DB_ROOT_PASSWORD:?请在 .env 中设置 ICLOUD99_DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: icloud99
+      MARIADB_USER: icloud99
+      MARIADB_PASSWORD: ${ICLOUD99_DB_PASSWORD:?请在 .env 中设置 ICLOUD99_DB_PASSWORD}
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--default-time-zone=+00:00"]
     volumes:
-      - cloudwatch-db-data:/var/lib/mysql
+      - icloud99-db-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-  cloudwatch-backend:
+  icloud99-backend:
     build: ./backend
-    container_name: cloudwatch-backend
+    container_name: icloud99-backend
     restart: unless-stopped
     depends_on:
-      cloudwatch-db:
+      icloud99-db:
         condition: service_healthy
     environment:
-      CW_ADDR: ":8080"
-      CW_DB_DSN: "cloudwatch:${CW_DB_PASSWORD}@tcp(cloudwatch-db:3306)/cloudwatch"
-      CW_SECRET_KEY: ${CW_SECRET_KEY:?请在 .env 中设置 CW_SECRET_KEY（至少 16 位随机串）}
-      CW_ADMIN_PASSWORD: ${CW_ADMIN_PASSWORD:-}
+      ICLOUD99_ADDR: ":8080"
+      ICLOUD99_DB_DSN: "icloud99:${ICLOUD99_DB_PASSWORD}@tcp(icloud99-db:3306)/icloud99"
+      ICLOUD99_SECRET_KEY: ${ICLOUD99_SECRET_KEY:?请在 .env 中设置 ICLOUD99_SECRET_KEY（至少 16 位随机串）}
+      ICLOUD99_ADMIN_PASSWORD: ${ICLOUD99_ADMIN_PASSWORD:-}
       TZ: Asia/Shanghai
 
-  cloudwatch-web:
+  icloud99-web:
     build: ./frontend
-    container_name: cloudwatch-web
+    container_name: icloud99-web
     restart: unless-stopped
     depends_on:
-      - cloudwatch-backend
+      - icloud99-backend
     ports:
-      - "3000:80"
+      - "80:80"
 
 volumes:
-  cloudwatch-db-data:
+  icloud99-db-data:

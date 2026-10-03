@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"time"
 
-	"cloudwatch/internal/auth"
-	"cloudwatch/internal/httpx"
-	"cloudwatch/internal/newapi"
-	"cloudwatch/internal/store"
-	"cloudwatch/internal/usage"
+	"icloud99/internal/auth"
+	"icloud99/internal/httpx"
+	"icloud99/internal/newapi"
+	"icloud99/internal/store"
+	"icloud99/internal/usage"
 )
 
 // newapiCfg 读取已保存的 New API 管理员配置；未配置返回 40002，前端据此引导到设置页。

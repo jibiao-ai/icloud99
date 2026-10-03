@@ -3,7 +3,7 @@ package api
 import (
 	"time"
 
-	"cloudwatch/internal/audit"
+	"icloud99/internal/audit"
 )
 
 func auditEntry(module, action, target, link string, detail any, err error, t0 time.Time) audit.Entry {
