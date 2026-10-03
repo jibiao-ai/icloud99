@@ -1,10 +1,6 @@
-node_modules
-dist
+**/node_modules
+**/dist
+**/bin
 .git
-.gitignore
-*.md
-*.log
 .env
-.dev.vars
-.wrangler
-certs
+e2e

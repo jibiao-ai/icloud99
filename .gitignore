@@ -1,7 +1,29 @@
+# dependencies / build
 node_modules/
 dist/
+backend/bin/
+*.exe
+
+# secrets
 .env
+.env.*
+!.env.example
 .dev.vars
-.wrangler/
+
+# runtime
 *.log
+logs/
+.pm2/
 certs/
+
+# backups
+*.backup
+*.bak
+*.tar.gz
+*.zip
+
+# e2e artifacts
+e2e/node_modules/
+e2e/.cache/
+e2e/shots/
+e2e/package-lock.json

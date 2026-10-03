@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   颜色唯一出处（铁律2）：所有颜色以 "R G B" 通道变量定义，
+   主色 --primary 运行时由「管理设置 → 系统参数」覆盖。
+   ============================================================ */
+:root {
+  --bg-page: 246 247 251;
+  --bg-card: 255 255 255;
+  --bg-muted: 240 242 247;
+  --bg-hover: 232 235 243;
+  --fg: 28 31 43;
+  --fg-muted: 90 97 116;
+  --fg-subtle: 140 146 163;
+  --line: 223 227 237;
+  --primary: 108 92 231;
+  --primary-hover: 81 60 200;
+  --primary-soft: 238 236 252;
+  --primary-text: 255 255 255;
+  --success: 22 148 98;
+  --success-soft: 226 245 237;
+  --warning: 196 120 10;
+  --warning-soft: 252 240 220;
+  --danger: 211 56 56;
+  --danger-soft: 252 230 230;
+  --info: 37 118 210;
+  --info-soft: 226 238 252;
+  --chart-grid: 228 231 240;
+}
+
+[data-theme='dark'] {
+  --bg-page: 15 18 28;
+  --bg-card: 24 28 41;
+  --bg-muted: 33 38 54;
+  --bg-hover: 42 48 68;
+  --fg: 232 235 245;
+  --fg-muted: 160 167 188;
+  --fg-subtle: 112 119 142;
+  --line: 48 54 74;
+  --primary-soft: 44 40 84;
+  --success-soft: 18 52 40;
+  --warning-soft: 58 42 16;
+  --danger-soft: 62 28 30;
+  --info-soft: 20 40 68;
+  --chart-grid: 42 48 66;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: rgb(var(--bg-page));
+  color: rgb(var(--fg));
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  /* 实色弹层：禁止毛玻璃，统一 bg-card + border + shadow */
+  .surface { @apply bg-card border border-line rounded-lg; }
+  .card { @apply bg-card border border-line rounded-xl; }
+  .card-pop { @apply bg-card border border-line rounded-lg shadow-pop; }
+
+  /* 输入框：聚焦仅中性色加深，无彩色高亮（铁律6） */
+  .field {
+    @apply w-full bg-card text-fg border border-line rounded-lg px-3 py-2 text-sm outline-none transition-colors placeholder:text-fg-subtle;
+  }
+  .field:hover { border-color: rgb(var(--fg-subtle)); }
+  .field:focus { border-color: rgb(var(--fg-muted)); }
+  .field:disabled { @apply bg-muted text-fg-subtle cursor-not-allowed; }
+  .field-error { border-color: rgb(var(--danger)) !important; }
+  .label { @apply block text-xs font-medium text-fg-muted mb-1.5; }
+  .hint { @apply text-xs text-fg-subtle mt-1; }
+  .err-text { @apply text-xs text-danger mt-1; }
+
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors select-none disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap; }
+  .btn-primary { @apply btn bg-primary text-primary-text hover:bg-primary-hover; }
+  .btn-default { @apply btn bg-card text-fg border border-line hover:bg-hover; }
+  .btn-ghost { @apply btn text-fg-muted hover:bg-hover hover:text-fg; }
+  .btn-danger { @apply btn bg-danger text-primary-text hover:opacity-90; }
+  .btn-sm { @apply px-2.5 py-1.5 text-xs; }
+  .btn-icon { @apply p-2; }
+  .btn:focus-visible { outline: 2px solid rgb(var(--fg-muted)); outline-offset: 2px; }
+
+  .tag-default, .tag-primary, .tag-success, .tag-warning, .tag-danger, .tag-info {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap;
+  }
+  .tag-default { @apply bg-muted text-fg-muted; }
+  .tag-primary { @apply bg-primary-soft text-primary; }
+  .tag-success { @apply bg-success-soft text-success; }
+  .tag-warning { @apply bg-warning-soft text-warning; }
+  .tag-danger { @apply bg-danger-soft text-danger; }
+  .tag-info { @apply bg-info-soft text-info; }
+
+  .th { @apply px-4 py-2.5 text-left text-xs font-semibold text-fg-muted bg-muted whitespace-nowrap; }
+  .td { @apply px-4 py-2.5 text-sm text-fg; }
+}
+
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgb(var(--fg-subtle) / 0.5); border-radius: 3px; }
+
+@keyframes cw-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: cw-fade 0.25s ease; }
+@keyframes cw-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.pulse-dot { animation: cw-pulse 2s ease-in-out infinite; }
+@keyframes cw-spin { to { transform: rotate(360deg); } }
+.spin { animation: cw-spin 0.8s linear infinite; }
+@keyframes cw-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.skeleton {
+  background: linear-gradient(90deg, rgb(var(--bg-muted)) 25%, rgb(var(--bg-hover)) 50%, rgb(var(--bg-muted)) 75%);
+  background-size: 200% 100%;
+  animation: cw-shimmer 1.6s infinite;
+  border-radius: 6px;
+}
+
+/* 渠道检测柱状图 */
+.spark { display: flex; align-items: flex-end; gap: 1px; height: 32px; }
+.spark > i { flex: 1; min-width: 2px; border-radius: 1px 1px 0 0; }

@@ -1,53 +1,46 @@
+# 元擎智算可视化：cloudwatch-web (nginx :3000) → cloudwatch-backend (Go :8080) → cloudwatch-db (MariaDB)
+# 启动前复制 .env.example 为 .env 并填写 4 个引导变量以及数据库口令；其余业务参数全部在页面「管理设置」中录入。
 services:
-  db:
+  cloudwatch-db:
     image: mariadb:11
-    container_name: yuanqing-db
-    environment:
-      MARIADB_ROOT_PASSWORD: rootpass123
-      MARIADB_DATABASE: yuanqing
-      MARIADB_USER: yuanqing
-      MARIADB_PASSWORD: yuanqing123
-    volumes:
-      - yuanqing-mariadb-data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    ports:
-      - "3306:3306"
+    container_name: cloudwatch-db
     restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${CW_DB_ROOT_PASSWORD:?请在 .env 中设置 CW_DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: cloudwatch
+      MARIADB_USER: cloudwatch
+      MARIADB_PASSWORD: ${CW_DB_PASSWORD:?请在 .env 中设置 CW_DB_PASSWORD}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--default-time-zone=+00:00"]
+    volumes:
+      - cloudwatch-db-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  app:
-    build: .
-    container_name: yuanqing-ai
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - DB_HOST=db
-      - DB_PORT=3306
-      - DB_USER=yuanqing
-      - DB_PASS=yuanqing123
-      - DB_NAME=yuanqing
+  cloudwatch-backend:
+    build: ./backend
+    container_name: cloudwatch-backend
+    restart: unless-stopped
     depends_on:
-      db:
+      cloudwatch-db:
         condition: service_healthy
-    restart: unless-stopped
+    environment:
+      CW_ADDR: ":8080"
+      CW_DB_DSN: "cloudwatch:${CW_DB_PASSWORD}@tcp(cloudwatch-db:3306)/cloudwatch"
+      CW_SECRET_KEY: ${CW_SECRET_KEY:?请在 .env 中设置 CW_SECRET_KEY（至少 16 位随机串）}
+      CW_ADMIN_PASSWORD: ${CW_ADMIN_PASSWORD:-}
+      TZ: Asia/Shanghai
 
-  nginx:
-    image: nginx:alpine
-    container_name: yuanqing-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certs:/etc/nginx/certs:ro
-    depends_on:
-      - app
+  cloudwatch-web:
+    build: ./frontend
+    container_name: cloudwatch-web
     restart: unless-stopped
+    depends_on:
+      - cloudwatch-backend
+    ports:
+      - "3000:80"
 
 volumes:
-  yuanqing-mariadb-data:
-    driver: local
+  cloudwatch-db-data:

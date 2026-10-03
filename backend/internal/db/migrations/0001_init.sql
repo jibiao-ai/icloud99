@@ -1,0 +1,78 @@
+-- 0001 基础表：管理员、配置、渠道、检测、审计
+CREATE TABLE IF NOT EXISTS admin_users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(100) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS api_configs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  provider VARCHAR(50) NOT NULL,
+  tier VARCHAR(50) NOT NULL,
+  base_url VARCHAR(500) NOT NULL DEFAULT '',
+  api_key_enc TEXT NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_provider_tier (provider, tier)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS channels (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  provider VARCHAR(50) NOT NULL,
+  tier VARCHAR(50) NOT NULL DEFAULT '',
+  model_id VARCHAR(255) NOT NULL,
+  icon VARCHAR(50) NOT NULL DEFAULT '',
+  rate_multiplier DOUBLE NOT NULL DEFAULT 1.0,
+  is_active TINYINT NOT NULL DEFAULT 1,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_channel (provider, tier, model_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS channel_tests (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  channel_id INT NOT NULL,
+  response_time_ms INT NOT NULL DEFAULT 0,
+  ping_ms INT NOT NULL DEFAULT 0,
+  success TINYINT NOT NULL DEFAULT 1,
+  tested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_channel_time (channel_id, tested_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS iq_tests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  provider VARCHAR(50) NOT NULL,
+  tier VARCHAR(50) NOT NULL,
+  model VARCHAR(255) NOT NULL,
+  test_type VARCHAR(50) NOT NULL,
+  result VARCHAR(50) NOT NULL,
+  score DOUBLE NOT NULL DEFAULT 0,
+  raw_response LONGTEXT NULL,
+  reasoning_tokens INT NOT NULL DEFAULT 0,
+  input_tokens INT NOT NULL DEFAULT 0,
+  output_tokens INT NOT NULL DEFAULT 0,
+  response_time_ms INT NOT NULL DEFAULT 0,
+  image_url TEXT NULL,
+  svg_code LONGTEXT NULL,
+  tested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_tested_at (tested_at),
+  INDEX idx_model_tier (model, tier)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  module VARCHAR(50) NOT NULL DEFAULT '',
+  action VARCHAR(100) NOT NULL,
+  target VARCHAR(255) NOT NULL DEFAULT '',
+  link VARCHAR(500) NOT NULL DEFAULT '',
+  detail TEXT NULL,
+  ip VARCHAR(100) NOT NULL DEFAULT '',
+  username VARCHAR(100) NOT NULL DEFAULT 'system',
+  success TINYINT NOT NULL DEFAULT 1,
+  duration_ms INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_action (action),
+  INDEX idx_module (module),
+  INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
