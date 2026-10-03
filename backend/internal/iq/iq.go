@@ -95,8 +95,8 @@ type chatResp struct {
 	} `json:"usage"`
 }
 
-// ChatTimeout 单次上游调用超时（SVG 生成实测 2~3 分钟）。
-const ChatTimeout = 280 * time.Second
+// ChatTimeout 单次上游调用超时（SVG 生成实测 2~5 分钟，波动较大）。
+const ChatTimeout = 600 * time.Second
 
 // Chat 调用 OpenAI 兼容 chat/completions。
 func Chat(ctx context.Context, hc *http.Client, baseURL, key, model, prompt string, maxTokens int, timeout time.Duration) (content string, in, out, reasoning int, err error) {

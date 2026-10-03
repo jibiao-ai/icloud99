@@ -42,7 +42,7 @@ export default function IQTestPage() {
     list.reload(); stats.reload();
   };
 
-  // 检测在后台执行（SVG 生成约 2~3 分钟），页面轮询任务状态，不受请求超时影响
+  // 检测在后台执行（SVG 生成约 2~5 分钟），页面轮询任务状态，不受请求超时影响
   const poll = async (tier) => {
     setRunning(tier);
     try {
@@ -68,7 +68,7 @@ export default function IQTestPage() {
       toast.error(e.message);
       return;
     }
-    toast.info(`${TIER_LABEL[tier]} 检测已开始，预计 2~3 分钟`);
+    toast.info(`${TIER_LABEL[tier]} 检测已开始，预计 2~5 分钟`);
     poll(tier);
   };
 
@@ -108,7 +108,7 @@ export default function IQTestPage() {
       )}
 
       <IQDetailModal t={detail} onClose={() => setDetail(null)} />
-      <ConfirmModal open={!!confirm} title={`运行 ${TIER_LABEL[confirm] || ''} 分组检测`} message="将调用上游模型生成鹈鹕骑行 SVG 动画，后台运行约 2~3 分钟并产生少量 Token 消耗。"
+      <ConfirmModal open={!!confirm} title={`运行 ${TIER_LABEL[confirm] || ''} 分组检测`} message="将调用上游模型生成鹈鹕骑行 SVG 动画，后台运行约 2~5 分钟并产生少量 Token 消耗。"
         confirmText="开始检测" onConfirm={() => run(confirm)} onCancel={() => setConfirm('')} />
     </div>
   );
