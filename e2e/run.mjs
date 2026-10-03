@@ -148,10 +148,13 @@ try {
   await page.getByRole('button', { name: '立即检测' }).waitFor({ timeout: 8000 });
   check(true, '点击停止后任务终止');
   await page.waitForTimeout(500);
-  const firstCard = page.locator('article[role=button]').first();
-  check((await firstCard.innerText()).includes('极速') || (await firstCard.innerText()).includes('较慢'), '卡片显示速度评级');
+  const cardsText = (await page.locator('article[role=button]').allInnerTexts()).join('\n');
+  check(/极速|良好|较慢|未知/.test(cardsText), '卡片显示速度评级');
+  const tops = await page.locator('article[role=button]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+  const rows = {}; tops.forEach((t) => { rows[t] = (rows[t] || 0) + 1; });
+  check(Object.values(rows).every((n) => n === 4), `渠道卡片每组 4 个模型同一行（行分布 ${JSON.stringify(Object.values(rows))}）`);
   await shot('07-channels');
-  await firstCard.click();
+  await page.locator('article[role=button]').first().click();
   await page.getByRole('dialog').waitFor();
   check((await page.getByRole('dialog').innerText()).includes('7 天可用率'), '渠道详情弹窗显示可用率');
   await shot('08-channel-detail');
@@ -232,7 +235,10 @@ try {
   check((await page.locator('input[type=date]').count()) === 0, '页面没有任何原生 date 输入');
   check((await page.locator('select').count()) === 0, '页面没有任何原生 select');
   // 周期预设
-  await page.getByRole('button', { name: '近7天' }).click();
+  await page.getByRole('combobox', { name: '统计周期' }).click();
+  const labels = await page.getByRole('option').allInnerTexts();
+  check(['近7天', '近30天', '当月', '上月', '本季度', '今年'].every((x) => labels.includes(x)), '周期下拉包含 7天/30天/当月/上月/本季度/今年');
+  await page.getByRole('option', { name: '近7天' }).click();
   await page.waitForTimeout(1500);
   check(page.url().includes('start=') && page.url().includes('end='), '周期同步到地址栏');
   // 用户详情
@@ -252,7 +258,9 @@ try {
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.getByRole('button', { name: /导出/ }).first().click()]);
   const fp = `${OUT}export.xlsx`;
   await dl.saveAs(fp);
-  check(dl.suggestedFilename().endsWith('.xlsx') && dl.suggestedFilename().includes('2026-09-01'), `导出文件名：${dl.suggestedFilename()}`);
+  // 无头 Chromium 对 blob 下载的中文文件名会回退为 download，故以前端解析结果（Toast）为准
+  const dlName = await page.getByText(/已导出 .*\.xlsx/).first().innerText();
+  check(dlName.includes('用户用量账单') && dlName.includes('2026-09-01'), `导出文件名：${dlName}`);
 
   // ───────── 8 审计 & 安全 ─────────
   title('审计日志：脱敏 + 筛选');

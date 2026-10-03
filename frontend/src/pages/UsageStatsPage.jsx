@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Users } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { usageApi } from '../services/api';
@@ -16,6 +16,7 @@ import UserTable from '../components/usage/UserTable';
 import UserDetailModal from '../components/usage/UserDetailModal';
 import ExportOptions from '../components/usage/ExportOptions';
 import { MAX_DAYS, daysBetween, matchPreset, presetRange } from '../components/usage/periods';
+import { useToast } from '../components/Toast';
 import { fmtDateTime } from '../utils/format';
 
 /** 用量统计：周期、筛选同步到地址栏，刷新与分享均可还原。 */
@@ -31,13 +32,33 @@ export default function UsageStatsPage() {
   const [filters, setFilters] = useState({ group: '', hideZero: false });
   const [exp, setExp] = useState({ details: false, maxRows: 10000 });
   const [detailUser, setDetailUser] = useState(null);
-  const [force, setForce] = useState(0);
+  const forceRef = useRef(false);
+  const toast = useToast();
+  const [now, setNow] = useState(() => Date.now());
 
   const setPeriod = useCallback((p) => setSp((old) => { const n = new URLSearchParams(old); n.set('start', p.start); n.set('end', p.end); return n; }, { replace: true }), [setSp]);
+  const takeForce = () => { const f = forceRef.current; forceRef.current = false; return f; };
   const { data, loading, refreshing, error, reload } = useAsync(
-    () => (valid ? usageApi.summary({ start, end, refresh: force ? 1 : undefined }) : Promise.resolve(null)),
-    [start, end, valid, force],
+    () => (valid ? usageApi.summary({ start, end, refresh: takeForce() ? 1 : undefined }) : Promise.resolve(null)),
+    [start, end, valid],
   );
+
+  // 手动刷新冷却：以后端下发的 nextRefreshAt 为准；冷却期内按钮禁用并显示倒计时
+  const nextAt = data?.meta?.nextRefreshAt || 0;
+  const left = Math.max(0, Math.ceil((nextAt - now) / 1000));
+  useEffect(() => {
+    setNow(Date.now());
+    if (!nextAt || nextAt <= Date.now()) return undefined;
+    const t = setInterval(() => { setNow(Date.now()); if (Date.now() >= nextAt) clearInterval(t); }, 1000);
+    return () => clearInterval(t);
+  }, [nextAt]);
+  const refresh = async () => {
+    if (left > 0 || loading || refreshing) return;
+    forceRef.current = true;
+    await reload();
+    setNow(Date.now());
+  };
+  useEffect(() => { if (data?.meta?.refreshDenied) toast.info('刷新过于频繁，已返回缓存数据'); }, [data?.meta?.generatedAt, data?.meta?.refreshDenied]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportParams = useCallback((extra = {}) => ({
     start, end, group: filters.group || undefined, includeZero: filters.hideZero ? 0 : 1,
@@ -52,8 +73,12 @@ export default function UsageStatsPage() {
   return (
     <div className="fade-in">
       <PageHeader
-        icon={Users} title="用量统计 · 全站用户账单" description="在指定周期内统计 New API 全站所有用户的消费账单，并与后台口径自动对账（北京时间）"
-        actions={<LoadingButton className="btn-default btn-sm" icon={RefreshCw} loading={refreshing || loading} onClick={() => { setForce((n) => n + 1); }}>强制刷新</LoadingButton>}
+        icon={Users} title="用量统计 · 全站用户账单" description="在指定周期内统计 New API 全站所有用户的消费账单，并与后台口径自动对账（北京时间）。数据带缓存，请勿频繁刷新"
+        actions={(
+          <LoadingButton className="btn-default btn-sm" icon={RefreshCw} loading={refreshing || loading} disabled={left > 0} onClick={refresh} title="为保护上游接口，手动刷新有冷却时间">
+            {left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} 后可刷新` : '刷新数据'}
+          </LoadingButton>
+        )}
       />
       <PeriodBar start={start} end={end} preset={preset} onChange={setPeriod} />
 

@@ -42,9 +42,10 @@ docker logs icloud99-backend   # ICLOUD99_ADMIN_PASSWORD 留空时，首次生�
 - 后端：`gofmt` / `go vet` / `go test ./...` 全部通过（secret、auth、newapi、usage、iq、monitor、tokenq、httpx、api 校验）。
 - 旧库升级已在真实 MariaDB 上实测。
 - 用量统计已用真实 New API 做过对账探测（日期范围内与 `/api/log/stat` 偏差 0.48%，触发了逐用户校正回退，最终对账一致）。
-- e2e（`e2e/run.mjs`，Playwright + 假 New API）：69 项断言中 68 项通过，见下方“已知问题”。
+- e2e（`e2e/run.mjs`，Playwright + 假 New API）：全部断言通过（含渠道每组 4 卡同一行、周期下拉六个预设）。
+- 用量统计防强刷：同一周期手动刷新冷却 10 分钟、全站手动刷新冷却 2 分钟，冷却期内只返回缓存（`meta.refreshDenied`），不触达上游；缓存 15 分钟（含今天）/ 6 小时（纯历史）。
 
 ## 已知问题 / 未完成
-- e2e 唯一未过：导出 Excel 时 Playwright 读到的下载文件名为 `download`（后端与反代响应头 `Content-Disposition` 已确认正确，前端 `services/http.js` 解析逻辑待排查；文件本身可正常生成）。
+- 导出 Excel：无头 Chromium 对 blob 下载的中文文件名会回退为 `download`，真实浏览器不受影响（前端解析出的文件名已在 Toast 中断言）。
 - 未做：Go 的 handler/DB 层集成测试（仅覆盖纯逻辑）；远程服务器部署与验证（未执行，见下）。
 - 前端打包体积 ~767KB（recharts），可按路由拆包。

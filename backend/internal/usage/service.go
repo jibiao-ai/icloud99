@@ -11,9 +11,13 @@ import (
 
 const (
 	userConcurrency = 3
-	cacheTTLRecent  = 5 * time.Minute
-	cacheTTLHistory = time.Hour
+	cacheTTLRecent  = 15 * time.Minute
+	cacheTTLHistory = 6 * time.Hour
 	cacheMax        = 50
+	// 手动刷新冷却：同一周期两次重算至少间隔 refreshCooldown；全站任意两次手动重算至少间隔 globalCooldown。
+	// 冷却期内的刷新请求不会触达上游，直接返回缓存（Meta.RefreshDenied=true），避免上游限流。
+	refreshCooldown = 10 * time.Minute
+	globalCooldown  = 2 * time.Minute
 )
 
 type cacheEntry struct {
@@ -28,6 +32,8 @@ type Service struct {
 	cache    map[string]cacheEntry
 	inflight map[string]chan struct{}
 	results  map[string]result
+	lastAny  time.Time
+	builder  func(context.Context, *newapi.Client, newapi.Cfg, Period) (Summary, error)
 }
 
 type result struct {
@@ -37,7 +43,7 @@ type result struct {
 
 // NewService 创建服务。
 func NewService(api *newapi.Client) *Service {
-	return &Service{API: api, cache: map[string]cacheEntry{}, inflight: map[string]chan struct{}{}, results: map[string]result{}}
+	return &Service{API: api, cache: map[string]cacheEntry{}, inflight: map[string]chan struct{}{}, results: map[string]result{}, builder: build}
 }
 
 // Invalidate 清空缓存（配置变更后）。
@@ -111,7 +117,8 @@ func build(ctx context.Context, api *newapi.Client, cfg newapi.Cfg, p Period) (S
 	return out, nil
 }
 
-// Get 返回周期汇总；包含今天的周期缓存 5 分钟，纯历史周期缓存 1 小时；同键并发请求合并。
+// Get 返回周期汇总；包含今天的周期缓存 15 分钟，纯历史周期缓存 6 小时；同键并发请求合并。
+// refresh=true 仅在冷却期外才会真正重算，否则返回缓存并标记 Meta.RefreshDenied。
 func (s *Service) Get(ctx context.Context, cfg newapi.Cfg, p Period, refresh bool) (Summary, error) {
 	key := fmt.Sprintf("%s|%d|%d", cfg.URL, p.StartTs, p.EndTs)
 	ttl := cacheTTLHistory
@@ -120,11 +127,27 @@ func (s *Service) Get(ctx context.Context, cfg newapi.Cfg, p Period, refresh boo
 	}
 	for {
 		s.mu.Lock()
-		if e, ok := s.cache[key]; ok && !refresh && time.Since(e.at) < ttl {
-			s.mu.Unlock()
-			d := e.data
-			d.Meta.Cached = true
-			return d, nil
+		if e, ok := s.cache[key]; ok {
+			denied := false
+			if refresh {
+				switch {
+				case time.Since(e.at) < refreshCooldown:
+					denied = true
+				case time.Since(s.lastAny) < globalCooldown:
+					denied = true
+				}
+			}
+			if (!refresh && time.Since(e.at) < ttl) || denied {
+				s.mu.Unlock()
+				d := e.data
+				d.Meta.Cached = true
+				d.Meta.RefreshDenied = denied
+				d.Meta.NextRefreshAt = nextRefresh(e.at, s.lastAny)
+				return d, nil
+			}
+		}
+		if refresh {
+			s.lastAny = time.Now()
 		}
 		if ch, ok := s.inflight[key]; ok {
 			s.mu.Unlock()
@@ -148,11 +171,12 @@ func (s *Service) Get(ctx context.Context, cfg newapi.Cfg, p Period, refresh boo
 
 		// 后台任务不随单个请求取消，避免合并等待者被连带失败
 		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
-		data, err := build(bctx, s.API, cfg, p)
+		data, err := s.builder(bctx, s.API, cfg, p)
 		cancel()
 
 		s.mu.Lock()
 		if err == nil {
+			data.Meta.NextRefreshAt = nextRefresh(time.Now(), s.lastAny)
 			s.cache[key] = cacheEntry{at: time.Now(), data: data}
 			if len(s.cache) > cacheMax {
 				var oldK string
@@ -172,6 +196,15 @@ func (s *Service) Get(ctx context.Context, cfg newapi.Cfg, p Period, refresh boo
 		time.AfterFunc(5*time.Second, func() { s.mu.Lock(); delete(s.results, key); s.mu.Unlock() })
 		return data, err
 	}
+}
+
+// nextRefresh 返回下次允许手动刷新的时间（毫秒时间戳）。
+func nextRefresh(at, lastAny time.Time) int64 {
+	t := at.Add(refreshCooldown)
+	if g := lastAny.Add(globalCooldown); g.After(t) {
+		t = g
+	}
+	return t.UnixMilli()
 }
 
 // UserDetail 单用户周期详情。

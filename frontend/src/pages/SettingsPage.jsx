@@ -5,7 +5,7 @@ import { channelApi } from '../services/api';
 import { useStore } from '../store';
 import { useCan } from '../hooks/useCan';
 import PageHeader from '../components/PageHeader';
-import Tabs from '../components/Tabs';
+import SettingsNav from '../components/settings/SettingsNav';
 import LoginForm from '../components/LoginForm';
 import ConfirmModal from '../components/ConfirmModal';
 import LoadingButton from '../components/LoadingButton';
@@ -17,11 +17,11 @@ import AuditTab from '../components/settings/AuditTab';
 import SecurityTab from '../components/settings/SecurityTab';
 
 const TABS = [
-  { key: 'keys', label: 'API 密钥', icon: KeyRound },
-  { key: 'system', label: '系统参数', icon: SlidersHorizontal },
-  { key: 'newapi', label: 'New API', icon: Server },
-  { key: 'audit', label: '审计日志', icon: ScrollText },
-  { key: 'security', label: '安全', icon: ShieldCheck },
+  { key: 'keys', label: 'API 密钥', icon: KeyRound, desc: '上游分组密钥' },
+  { key: 'system', label: '系统参数', icon: SlidersHorizontal, desc: '检测与保留策略' },
+  { key: 'newapi', label: 'New API', icon: Server, desc: '账单数据源' },
+  { key: 'audit', label: '审计日志', icon: ScrollText, desc: '操作留痕' },
+  { key: 'security', label: '安全', icon: ShieldCheck, desc: '账号与密码' },
 ];
 
 export default function SettingsPage() {
@@ -58,7 +58,7 @@ export default function SettingsPage() {
           </>
         )}
       />
-      <Tabs items={TABS} value={tab} onChange={(k) => setSp({ tab: k }, { replace: true })} idPrefix="settings" />
+      <SettingsNav items={TABS} value={tab} onChange={(k) => setSp({ tab: k }, { replace: true })} />
       <div id="settings-panel" role="tabpanel">
         {tab === 'keys' && canEdit && <KeysTab />}
         {tab === 'system' && canEdit && <SystemTab />}

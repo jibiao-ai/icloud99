@@ -5,7 +5,6 @@ import { channelApi } from '../services/api';
 import { useAsync } from '../hooks/useAsync';
 import { useCan } from '../hooks/useCan';
 import PageHeader from '../components/PageHeader';
-import Pagination from '../components/Pagination';
 import EmptyState from '../components/EmptyState';
 import ErrorState from '../components/ErrorState';
 import Skeleton from '../components/Skeleton';
@@ -15,12 +14,9 @@ import ChannelDetailModal from '../components/channels/ChannelDetailModal';
 import TestRunner from '../components/channels/TestRunner';
 import { PROVIDERS, TIER_LABEL } from '../components/channels/meta';
 
-const PAGE = 12;
-
 export default function ChannelStatusPage() {
   const [sp, setSp] = useSearchParams();
   const provider = PROVIDERS[sp.get('provider')] ? sp.get('provider') : 'anthropic';
-  const page = Math.max(1, Number(sp.get('page')) || 1);
   const [open, setOpen] = useState(null);
   const canManage = useCan('channel:manage');
   const { data, loading, refreshing, error, reload } = useAsync(() => channelApi.list(7), []);
@@ -31,9 +27,6 @@ export default function ChannelStatusPage() {
   const all = data || [];
   const counts = useMemo(() => Object.fromEntries(Object.keys(PROVIDERS).map((k) => [k, all.filter((c) => c.provider === k).length])), [all]);
   const list = useMemo(() => all.filter((c) => c.provider === provider), [all, provider]);
-  const pages = Math.max(1, Math.ceil(list.length / PAGE));
-  const cur = Math.min(page, pages);
-  const slice = list.slice((cur - 1) * PAGE, cur * PAGE);
   const openName = all.find((c) => c.id === open)?.name;
 
   const seed = async () => { setSeeding(true); try { await channelApi.seed(); await reload(); } finally { setSeeding(false); } };
@@ -51,14 +44,14 @@ export default function ChannelStatusPage() {
       />
       <div role="tablist" className="flex gap-2 mb-4">
         {Object.entries(PROVIDERS).map(([k, v]) => (
-          <button key={k} role="tab" aria-selected={provider === k} onClick={() => go({ provider: k, page: '' })}
+          <button key={k} role="tab" aria-selected={provider === k} onClick={() => go({ provider: k })}
             className={`rounded-lg px-4 py-2 text-sm transition-colors ${provider === k ? 'bg-primary text-primary-text font-semibold' : 'bg-card border border-line text-fg-muted hover:bg-hover'}`}>
             {v.label}<span className="ml-2 text-[11px] opacity-70">{counts[k] || 0}</span>
           </button>
         ))}
       </div>
 
-      {loading && <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40" />)}</div>}
+      {loading && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-40" />)}</div>}
       {error && <div className="card"><ErrorState error={error} onRetry={reload} /></div>}
       {!loading && !error && all.length === 0 && (
         <div className="card">
@@ -71,16 +64,15 @@ export default function ChannelStatusPage() {
           {list.length === 0 ? <div className="card"><EmptyState title={`${PROVIDERS[provider].label} 暂无渠道`} /></div> : (
             <>
               {['lite', 'standard', 'ultra'].map((tier) => {
-                const g = slice.filter((c) => c.tier === tier);
+                const g = list.filter((c) => c.tier === tier);
                 if (!g.length) return null;
                 return (
                   <section key={tier} className="mb-5">
-                    <h3 className="text-xs font-semibold text-fg-muted mb-2">{TIER_LABEL[tier]} 分组</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{g.map((c) => <ChannelCard key={c.id} ch={c} onOpen={setOpen} />)}</div>
+                    <h3 className="text-sm font-semibold text-fg mb-2.5 flex items-center gap-2"><span className="inline-block w-1 h-4 rounded bg-primary" />{TIER_LABEL[tier]} 分组<span className="text-[11px] font-normal text-fg-subtle">{g.length} 个模型</span></h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">{g.map((c) => <ChannelCard key={c.id} ch={c} onOpen={setOpen} />)}</div>
                   </section>
                 );
               })}
-              {list.length > PAGE && <div className="card"><Pagination page={cur} pageSize={PAGE} total={list.length} onPageChange={(p) => go({ page: p > 1 ? String(p) : '' })} sizes={false} /></div>}
             </>
           )}
         </>

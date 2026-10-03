@@ -4,11 +4,9 @@ import { todayCST, ymd } from '../../utils/format';
 const add = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 
 export const PRESETS = [
-  { key: 'today', label: '今日' },
-  { key: 'yesterday', label: '昨日' },
   { key: '7d', label: '近7天' },
   { key: '30d', label: '近30天' },
-  { key: 'month', label: '本月' },
+  { key: 'month', label: '当月' },
   { key: 'lastMonth', label: '上月' },
   { key: 'quarter', label: '本季度' },
   { key: 'year', label: '今年' },
@@ -18,8 +16,6 @@ export const PRESETS = [
 export function presetRange(key, now = todayCST()) {
   const y = now.getFullYear(), m = now.getMonth();
   switch (key) {
-    case 'today': return { start: ymd(now), end: ymd(now) };
-    case 'yesterday': { const d = add(now, -1); return { start: ymd(d), end: ymd(d) }; }
     case '7d': return { start: ymd(add(now, -6)), end: ymd(now) };
     case '30d': return { start: ymd(add(now, -29)), end: ymd(now) };
     case 'month': return { start: ymd(new Date(y, m, 1)), end: ymd(now) };

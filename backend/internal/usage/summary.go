@@ -179,6 +179,10 @@ type Meta struct {
 	ElapsedMs   int64    `json:"elapsedMs"`
 	GeneratedAt int64    `json:"generatedAt"`
 	Cached      bool     `json:"cached"`
+	// RefreshDenied：本次请求要求强制刷新但处于冷却期，已改为返回缓存。
+	RefreshDenied bool `json:"refreshDenied"`
+	// NextRefreshAt：下次允许手动刷新的毫秒时间戳。
+	NextRefreshAt int64 `json:"nextRefreshAt"`
 }
 
 // Assemble 把用户聚合装配成 Summary（纯函数）。siteQuota<0 表示未对账。
