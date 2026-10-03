@@ -53,14 +53,14 @@ export default function KeysTab() {
   };
 
   return (
-    <div className="max-w-4xl">
+    <div className="w-full">
       <p className="text-xs text-fg-muted mb-4">为每个分组配置上游 API 地址与密钥，供渠道检测与智力检测使用。密钥加密存储，保存后不再回显。</p>
       {Object.keys(PROVIDERS).map((pv) => (
         <section key={pv} className="card p-5 mb-4">
           <h3 className="text-sm font-semibold text-fg mb-4">{PROVIDERS[pv].label}</h3>
           <div className="space-y-4">
             {rows.map((r, i) => r.provider !== pv ? null : (
-              <div key={`${r.provider}/${r.tier}`} className="grid grid-cols-1 md:grid-cols-[88px_1fr_1fr_auto] gap-3 items-start">
+              <div key={`${r.provider}/${r.tier}`} className="grid grid-cols-1 md:grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_40px] gap-3 items-start">
                 <div className="pt-2"><span className={TIER_TAG[r.tier]}>{TIER_LABEL[r.tier]}</span></div>
                 <FormField error={errs[`${i}.baseUrl`]}>
                   <input className={`field ${errs[`${i}.baseUrl`] ? 'field-error' : ''}`} placeholder="上游 API 地址 https://…" aria-label={`${PROVIDERS[pv].label} ${r.tier} 地址`} value={r.baseUrl} onChange={(e) => upd(i, { baseUrl: e.target.value })} />

@@ -18,7 +18,7 @@ function Section({ title, desc, children }) {
     <section className="card p-5 mb-4">
       <h3 className="text-sm font-semibold text-fg">{title}</h3>
       {desc && <p className="text-xs text-fg-muted mt-0.5 mb-4">{desc}</p>}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">{children}</div>
     </section>
   );
 }
@@ -54,7 +54,7 @@ export default function SystemTab() {
   };
 
   return (
-    <div className="max-w-4xl">
+    <div className="w-full">
       <Section title="站点与展示" desc="影响页面名称、主题色以及令牌用量的金额换算。">
         <FormField label="站点名称" htmlFor="s-site.name" error={errs['site.name']}>{inp('site.name')}</FormField>
         <FormField label="主题色" htmlFor="s-site.primary_color" error={errs['site.primary_color']} hint="格式 #RRGGBB，保存后全站立即生效">

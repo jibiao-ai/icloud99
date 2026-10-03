@@ -20,7 +20,7 @@ export default function NewApiTab() {
   const [result, setResult] = useState(null);
   useEffect(() => { if (data) setF({ ...data }); }, [data]);
 
-  if (loading || !f) return error ? <ErrorState error={error} onRetry={reload} /> : <Skeleton className="h-64 max-w-xl" />;
+  if (loading || !f) return error ? <ErrorState error={error} onRetry={reload} /> : <Skeleton className="h-64 w-full" />;
   const set = (k) => (v) => { setF({ ...f, [k]: v }); setErrs({ ...errs, [k]: '' }); };
 
   const save = async () => {
@@ -37,18 +37,18 @@ export default function NewApiTab() {
   };
 
   return (
-    <div className="max-w-xl">
+    <div className="w-full">
       <p className="text-xs text-fg-muted mb-4">「用量统计」通过该管理员账号登录 New API，读取全站用户与账单。需要 role ≥ 10 的管理员。密码加密存储，保存后不再回显。</p>
-      <section className="card p-5 space-y-4">
+      <section className="card p-5 grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
         <FormField label="New API 地址" htmlFor="na-url" error={errs.baseUrl} required><input id="na-url" className={`field ${errs.baseUrl ? 'field-error' : ''}`} placeholder="https://api.example.com" value={f.baseUrl} onChange={(e) => set('baseUrl')(e.target.value)} /></FormField>
         <FormField label="管理员用户名" htmlFor="na-user" error={errs.username} required><input id="na-user" className={`field ${errs.username ? 'field-error' : ''}`} autoComplete="off" value={f.username} onChange={(e) => set('username')(e.target.value)} /></FormField>
         <FormField label="管理员密码" htmlFor="na-pass" error={errs.password} required><SecretInput id="na-pass" saved={f.saved} value={f.password} invalid={!!errs.password} onChange={set('password')} /></FormField>
-        <div className="flex items-center gap-2 pt-1">
+        <div className="md:col-span-3 flex items-center gap-2 pt-1">
           <LoadingButton loading={busy} icon={Save} onClick={save}>保存</LoadingButton>
           <LoadingButton className="btn-default" loading={testing} disabled={!f.saved} icon={PlugZap} onClick={test}>测试连接</LoadingButton>
         </div>
-        {!f.saved && <p className="hint">请先保存配置，再测试连接。</p>}
-        {result && <p role="status" className={`text-xs rounded-lg px-3 py-2 break-words ${result.ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'}`}>{result.text}</p>}
+        {!f.saved && <p className="hint md:col-span-3">请先保存配置，再测试连接。</p>}
+        {result && <p role="status" className={`md:col-span-3 text-xs rounded-lg px-3 py-2 break-words ${result.ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'}`}>{result.text}</p>}
       </section>
     </div>
   );

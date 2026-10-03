@@ -33,12 +33,12 @@ export default function SecurityTab() {
   };
 
   return (
-    <form className="card p-5 max-w-md space-y-4" onSubmit={submit} noValidate>
-      <p className="text-xs text-fg-muted">修改后需要重新登录。建议使用 8 位以上的强密码。</p>
+    <form className="card p-5 grid grid-cols-1 md:grid-cols-3 gap-4 items-start" onSubmit={submit} noValidate>
+      <p className="md:col-span-3 text-xs text-fg-muted">修改后需要重新登录。建议使用 8 位以上的强密码。</p>
       <FormField label="当前密码" htmlFor="pw-cur" error={errs.currentPassword}><input id="pw-cur" type="password" autoComplete="current-password" className={`field ${errs.currentPassword ? 'field-error' : ''}`} value={f.currentPassword} onChange={set('currentPassword')} /></FormField>
       <FormField label="新密码" htmlFor="pw-new" error={errs.newPassword}><input id="pw-new" type="password" autoComplete="new-password" className={`field ${errs.newPassword ? 'field-error' : ''}`} value={f.newPassword} onChange={set('newPassword')} /></FormField>
       <FormField label="确认新密码" htmlFor="pw-cfm" error={errs.confirm}><input id="pw-cfm" type="password" autoComplete="new-password" className={`field ${errs.confirm ? 'field-error' : ''}`} value={f.confirm} onChange={set('confirm')} /></FormField>
-      <LoadingButton type="submit" loading={busy} icon={KeyRound} onClick={undefined}>修改密码</LoadingButton>
+      <div className="md:col-span-3"><LoadingButton type="submit" loading={busy} icon={KeyRound} onClick={undefined}>修改密码</LoadingButton></div>
     </form>
   );
 }
