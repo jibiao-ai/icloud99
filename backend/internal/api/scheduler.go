@@ -60,14 +60,7 @@ func (s *Server) tickIQ(ctx context.Context, now time.Time, lastHour *int) {
 		return
 	}
 	*lastHour = h
-	go func() {
-		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		t0 := time.Now()
-		out, err := s.RunIQ(cctx, tier)
-		if err != nil {
-			log.Printf("[iq] 自动检测 %s 失败: %v", tier, err)
-		}
-		s.Audit.Record(auditEntry("iq", "auto_run", tier, "/iq", out, err, t0))
-	}()
+	if !s.startIQ(tier, "", "") {
+		log.Printf("[iq] 已有检测任务在运行，跳过 %s", tier)
+	}
 }

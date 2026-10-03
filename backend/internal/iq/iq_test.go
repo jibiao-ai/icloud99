@@ -1,51 +1,74 @@
 package iq
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestScoreCandy(t *testing.T) {
-	long := strings.Repeat("推理过程", 60) + "至少需要取出21个才能保证，最少为21"
+func TestScoreSVG(t *testing.T) {
+	pad := strings.Repeat(`<circle r="1"/>`, 20)
 	cases := []struct {
 		name, in, want string
 		score          float64
 	}{
-		{"完整推理", long, "pass", 100},
-		{"只有答案", "答案是 21", "works", 70},
-		{"答案错误", "答案是 20", "degraded", 0},
-		{"数字包含21但非答案", "共 121 个、210 个", "degraded", 0},
+		{"CSS动画", "<svg>" + pad + "<style>@keyframes spin{to{transform:rotate(360deg)}}.w{animation: spin 1s infinite}</style></svg>", "pass", 100},
+		{"SMIL动画", "<svg>" + pad + `<animateTransform attributeName="transform" type="rotate" dur="1s"/></svg>`, "pass", 100},
+		{"静态图", "<svg>" + pad + "</svg>", "works", 60},
+		{"过短", "<svg></svg>", "degraded", 0},
 		{"空", "", "degraded", 0},
-		{"行首即21", "21", "works", 70},
 	}
 	for _, c := range cases {
-		got, sc := ScoreCandy(c.in)
+		got, sc := ScoreSVG(c.in)
 		if got != c.want || sc != c.score {
 			t.Errorf("%s: got %s/%v want %s/%v", c.name, got, sc, c.want, c.score)
 		}
 	}
 }
 
-func TestCombine(t *testing.T) {
-	cases := []struct {
-		r      string
-		s      float64
-		svg    bool
-		wr     string
-		wscore float64
-	}{
-		{"degraded", 0, true, "works", 50},
-		{"degraded", 0, false, "degraded", 0},
-		{"pass", 100, true, "pass", 100},
-		{"works", 70, true, "works", 70},
-		{"works", 70, false, "works", 70},
+func chatServer(t *testing.T, h http.HandlerFunc) (*httptest.Server, string) {
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv, srv.URL
+}
+
+func TestChatErrors(t *testing.T) {
+	_, url := chatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"bad gateway"}`, 502)
+	})
+	_, _, _, _, err := Chat(context.Background(), &http.Client{}, url, "k", "m", "p", 10, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("%v", err)
 	}
-	for i, c := range cases {
-		r, s := Combine(c.r, c.s, c.svg)
-		if r != c.wr || s != c.wscore {
-			t.Errorf("#%d got %s/%v", i, r, s)
+	_, slow := chatServer(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(300 * time.Millisecond) })
+	_, _, _, _, err = Chat(context.Background(), &http.Client{}, slow, "k", "m", "p", 10, 50*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "超时") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestRun(t *testing.T) {
+	svg := "<svg>" + strings.Repeat(`<circle r="1"/>`, 20) + "<style>@keyframes a{to{opacity:0}}</style></svg>"
+	body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": "好的 " + svg}}},
+		"usage": map[string]any{"prompt_tokens": 5, "completion_tokens": 9}})
+	_, url := chatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer k" {
+			http.Error(w, "no", 401)
+			return
 		}
+		w.Write(body)
+	})
+	res := Run(context.Background(), &http.Client{}, url, "k", "m")
+	if res.Err != nil || res.Result != "pass" || res.Score != 100 || !res.HasSVG || res.OutputTokens != 9 {
+		t.Fatalf("%+v", res)
+	}
+	bad := Run(context.Background(), &http.Client{}, url, "wrong", "m")
+	if bad.Err == nil || bad.Result != "degraded" || !strings.HasPrefix(bad.RawResponse, "Error: ") {
+		t.Fatalf("%+v", bad)
 	}
 }
 

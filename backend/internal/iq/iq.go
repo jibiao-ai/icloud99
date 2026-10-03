@@ -1,30 +1,21 @@
-// Package iq 实现“智力检测”：糖果推理题 + 鹈鹕骑行 SVG 生成，以及评分与调度。
+// Package iq 实现“智力检测”：鹈鹕骑行 SVG 动画生成检测，以及评分与调度。
 package iq
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
 // Tiers 轮转分组。
 var Tiers = []string{"lite", "standard", "ultra"}
-
-// CandyPrompt 糖果推理题（标准答案 21）。
-const CandyPrompt = `不使用任何外部工具回答以下问题：
-
-在一个黑色的袋子里放有三种口味的糖果，每种糖果有两种不同的形状（圆形和五角星形，不同的形状靠手感可以分辨）。现已知不同口味的糖和不同形状的数量统计如下表。参赛者需要在活动前决定摸出的糖果数目，那么，最少取出多少个糖果才能保证手中同时拥有不同形状的苹果味和桃子味的糖？（同时手中有圆形苹果味匹配五角星桃子味糖果，或者有圆形桃子味匹配五角星苹果味糖果都满足要求）
-
-        苹果味  桃子味  西瓜味
-圆形       7      9      8
-五角星形   7      6      4`
 
 // SVGPrompt 鹈鹕骑行动画提示词。
 const SVGPrompt = `Generate an SVG of a pelican riding a bicycle. The SVG must include CSS animations to show the pelican pedaling and the bicycle wheels spinning. Make it a fun animated scene with the pelican actively cycling. Use <animate> or CSS @keyframes for smooth continuous animation.`
@@ -39,42 +30,29 @@ type Result struct {
 	OutputTokens    int
 	ResponseTimeMs  int
 	SVG             string
-	CandyOK         bool
 	HasSVG          bool
+	Err             error // 上游调用失败原因（失败也会落一条降智记录，便于排查）
 }
 
-var (
-	answerRe = regexp.MustCompile(`(?:^|[^\d])21(?:[^\d]|$)`)
-	svgRe    = regexp.MustCompile(`(?is)<svg.*?</svg>`)
-)
-
-// ScoreCandy 评估糖果题回答：含 21 且有推理说明 → pass；仅含答案 → works；否则 degraded。
-func ScoreCandy(content string) (string, float64) {
-	if !answerRe.MatchString(content) {
-		return "degraded", 0
-	}
-	if len([]rune(content)) > 200 && (strings.Contains(content, "最少") || strings.Contains(content, "保证")) {
-		return "pass", 100
-	}
-	return "works", 70
-}
-
-// Combine 综合两项结果：生成了 SVG 时，降智升为可疑，通过满分。
-func Combine(result string, score float64, hasSVG bool) (string, float64) {
-	if hasSVG && result == "degraded" {
-		if score < 50 {
-			score = 50
-		}
-		return "works", score
-	}
-	if hasSVG && result == "pass" {
-		return "pass", 100
-	}
-	return result, score
-}
+var svgRe = regexp.MustCompile(`(?is)<svg.*?</svg>`)
 
 // ExtractSVG 提取首个完整 <svg>…</svg>。
 func ExtractSVG(content string) string { return svgRe.FindString(content) }
+
+// animRe 识别 SVG 内的动画：CSS @keyframes / animation 属性 / SMIL 标签。
+var animRe = regexp.MustCompile(`(?i)@keyframes|animation\s*:|animation-name|<animate(Transform|Motion)?[\s>/]|<set[\s>/]`)
+
+// ScoreSVG 评估鹈鹕骑行 SVG：
+// 含有效 SVG 且带动画 → pass(100)；有 SVG 但无动画 → works(60，可疑)；无 SVG/调用失败 → degraded(0)。
+func ScoreSVG(svg string) (string, float64) {
+	if len(svg) < 200 {
+		return "degraded", 0
+	}
+	if animRe.MatchString(svg) {
+		return "pass", 100
+	}
+	return "works", 60
+}
 
 // TierAt 返回 CST 小时对应的检测分组；窗口外返回 ok=false。窗口 [start,end)。
 func TierAt(hour, start, end int) (string, bool) {
@@ -117,6 +95,9 @@ type chatResp struct {
 	} `json:"usage"`
 }
 
+// ChatTimeout 单次上游调用超时（SVG 生成实测 2~3 分钟）。
+const ChatTimeout = 280 * time.Second
+
 // Chat 调用 OpenAI 兼容 chat/completions。
 func Chat(ctx context.Context, hc *http.Client, baseURL, key, model, prompt string, maxTokens int, timeout time.Duration) (content string, in, out, reasoning int, err error) {
 	body, _ := json.Marshal(map[string]any{"model": model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "max_tokens": maxTokens, "stream": false})
@@ -127,12 +108,19 @@ func Chat(ctx context.Context, hc *http.Client, baseURL, key, model, prompt stri
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := hc.Do(req)
 	if err != nil {
-		return "", 0, 0, 0, err
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", 0, 0, 0, fmt.Errorf("上游响应超时（>%ds）", int(timeout.Seconds()))
+		}
+		return "", 0, 0, 0, fmt.Errorf("连接上游失败: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode != 200 {
-		return "", 0, 0, 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+		msg := strings.TrimSpace(string(raw))
+		if r := []rune(msg); len(r) > 160 {
+			msg = string(r[:160])
+		}
+		return "", 0, 0, 0, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, msg)
 	}
 	var r chatResp
 	if err := json.Unmarshal(raw, &r); err != nil {
@@ -144,52 +132,20 @@ func Chat(ctx context.Context, hc *http.Client, baseURL, key, model, prompt stri
 	return content, r.Usage.PromptTokens, r.Usage.CompletionTokens, r.Usage.Details.Reasoning, nil
 }
 
-// Run 并行执行糖果题与 SVG 生成并综合评分。
+// Run 调用上游生成鹈鹕骑行 SVG 并评分。上游失败不 panic，返回降智记录并带 Err。
 func Run(ctx context.Context, hc *http.Client, baseURL, key, model string) Result {
-	var candy, svg struct {
-		content         string
-		in, out, reason int
-		err             error
-		ms              int
+	t0 := time.Now()
+	content, in, out, reasoning, err := Chat(ctx, hc, baseURL, key, model, SVGPrompt, 16000, ChatTimeout)
+	ms := int(time.Since(t0).Milliseconds())
+	if err != nil {
+		return Result{Result: "degraded", RawResponse: "Error: " + err.Error(), ResponseTimeMs: ms, InputTokens: in, OutputTokens: out, ReasoningTokens: reasoning, Err: err}
 	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		t0 := time.Now()
-		candy.content, candy.in, candy.out, candy.reason, candy.err = Chat(ctx, hc, baseURL, key, model, CandyPrompt, 4096, 120*time.Second)
-		candy.ms = int(time.Since(t0).Milliseconds())
-	}()
-	go func() {
-		defer wg.Done()
-		t0 := time.Now()
-		svg.content, svg.in, svg.out, svg.reason, svg.err = Chat(ctx, hc, baseURL, key, model, SVGPrompt, 16000, 180*time.Second)
-		svg.ms = int(time.Since(t0).Milliseconds())
-	}()
-	wg.Wait()
-
-	res, score := "degraded", 0.0
-	raw := ""
-	if candy.err != nil {
-		raw = "Error: " + candy.err.Error()
-	} else {
-		res, score = ScoreCandy(candy.content)
-		raw = candy.content
-		if r := []rune(raw); len(r) > 2000 {
-			raw = string(r[:2000])
-		}
+	svg := ExtractSVG(content)
+	res, score := ScoreSVG(svg)
+	raw := content
+	if r := []rune(raw); len(r) > 2000 {
+		raw = string(r[:2000])
 	}
-	svgCode := ""
-	if svg.err == nil {
-		svgCode = ExtractSVG(svg.content)
-	}
-	final, fscore := Combine(res, score, svgCode != "")
-	ms := candy.ms
-	if svg.ms > ms {
-		ms = svg.ms
-	}
-	return Result{
-		Result: final, Score: fscore, RawResponse: raw, SVG: svgCode, HasSVG: svgCode != "", CandyOK: res != "degraded",
-		ReasoningTokens: candy.reason + svg.reason, InputTokens: candy.in + svg.in, OutputTokens: candy.out + svg.out, ResponseTimeMs: ms,
-	}
+	return Result{Result: res, Score: score, RawResponse: raw, SVG: svg, HasSVG: svg != "",
+		ReasoningTokens: reasoning, InputTokens: in, OutputTokens: out, ResponseTimeMs: ms}
 }

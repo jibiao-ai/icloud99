@@ -170,6 +170,7 @@ try {
   await page.getByRole('button', { name: '开始检测' }).click();
   await page.locator('article[role=button]').first().waitFor({ timeout: 30000 });
   check(true, '检测完成并出现结果卡片');
+  check(!(await page.locator('body').innerText()).includes('糖果'), '页面不再出现糖果检测');
   const iframe = page.locator('article iframe').first();
   check((await iframe.getAttribute('sandbox')) === '', 'SVG 在 sandbox iframe 中渲染（脚本被禁用）');
   const txt = await page.locator('article[role=button]').first().innerText();

@@ -25,6 +25,7 @@ export const iqApi = {
   stats: () => http.get('/iq/stats'),
   schedule: () => http.get('/iq/schedule'),
   run: (tier) => http.post('/iq/run', { tier }),
+  runStatus: () => http.get('/iq/run/status'),
 };
 
 export const tokenApi = {

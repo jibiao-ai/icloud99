@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Brain, Cpu, Lock, Play } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { iqApi } from '../services/api';
@@ -31,16 +31,26 @@ export default function IQTestPage() {
   const [running, setRunning] = useState('');
   const [confirm, setConfirm] = useState('');
 
-  const run = async (tier) => {
-    setConfirm('');
+  const finish = (tier, st) => {
+    if (st.error) {
+      toast.error(`${TIER_LABEL[tier]}：检测失败 - ${st.error}`);
+    } else {
+      const m = RESULT[st.result] || RESULT.degraded;
+      (st.result === 'pass' ? toast.success : st.result === 'works' ? toast.warning : toast.error)(`${TIER_LABEL[tier]}：${m.label}`);
+    }
+    list.setQuery({ page: 1 });
+    list.reload(); stats.reload();
+  };
+
+  // 检测在后台执行（SVG 生成约 2~3 分钟），页面轮询任务状态，不受请求超时影响
+  const poll = async (tier) => {
     setRunning(tier);
     try {
-      const r = await iqApi.run(tier);
-      const m = RESULT[r.result] || RESULT.degraded;
-      const msg = `${TIER_LABEL[tier]}：${m.label}（${(r.responseTimeMs / 1000).toFixed(1)}s）${r.hasSvg ? ' · 已生成 SVG 动画' : ''}`;
-      (r.result === 'pass' ? toast.success : r.result === 'works' ? toast.warning : toast.error)(msg);
-      list.setQuery({ page: 1 });
-      list.reload(); stats.reload();
+      for (;;) {
+        await new Promise((res) => { setTimeout(res, 3000); });
+        const st = await iqApi.runStatus();
+        if (!st.running) { finish(tier, st); return; }
+      }
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -48,12 +58,32 @@ export default function IQTestPage() {
     }
   };
 
+  const run = async (tier) => {
+    setConfirm('');
+    setRunning(tier);
+    try {
+      await iqApi.run(tier);
+    } catch (e) {
+      setRunning('');
+      toast.error(e.message);
+      return;
+    }
+    toast.info(`${TIER_LABEL[tier]} 检测已开始，预计 2~3 分钟`);
+    poll(tier);
+  };
+
+  useEffect(() => {
+    if (!canRun) return;
+    iqApi.runStatus().then((st) => { if (st.running) poll(st.tier); }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canRun]);
+
   const model = schedule.data?.model || 'gpt-6-astra';
   return (
     <div className="fade-in">
       <PageHeader
         icon={Brain} title="智力检测 · 鹈鹕骑行"
-        description={`Codex Candy Eval + SVG 动画生成 · 检测模型 ${model} · 每天 ${schedule.data?.startHour ?? 2}:00–${schedule.data?.endHour ?? 8}:00（北京时间）按小时轮转分组`}
+        description={`SVG 动画生成 · 检测模型 ${model} · 每天 ${schedule.data?.startHour ?? 2}:00–${schedule.data?.endHour ?? 8}:00（北京时间）按小时轮转分组`}
         actions={(
           <>
             {TIERS.map((t) => (canRun
@@ -78,7 +108,7 @@ export default function IQTestPage() {
       )}
 
       <IQDetailModal t={detail} onClose={() => setDetail(null)} />
-      <ConfirmModal open={!!confirm} title={`运行 ${TIER_LABEL[confirm] || ''} 分组检测`} message="将调用上游模型执行糖果推理题与 SVG 生成，耗时约 1~3 分钟并产生少量 Token 消耗。"
+      <ConfirmModal open={!!confirm} title={`运行 ${TIER_LABEL[confirm] || ''} 分组检测`} message="将调用上游模型生成鹈鹕骑行 SVG 动画，后台运行约 2~3 分钟并产生少量 Token 消耗。"
         confirmText="开始检测" onConfirm={() => run(confirm)} onCancel={() => setConfirm('')} />
     </div>
   );

@@ -86,10 +86,6 @@ http.createServer((req, res) => {
         const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250"><style>@keyframes spin{to{transform:rotate(360deg)}}.w{transform-origin:center;transform-box:fill-box;animation:spin 1s linear infinite}</style><rect width="400" height="250" fill="#dfeafc"/><g class="w"><circle cx="110" cy="170" r="38" fill="none" stroke="#333" stroke-width="5"/></g><g class="w"><circle cx="290" cy="170" r="38" fill="none" stroke="#333" stroke-width="5"/></g><path d="M110 170 L200 110 L290 170" stroke="#c0392b" stroke-width="6" fill="none"/><ellipse cx="200" cy="90" rx="34" ry="24" fill="#fff" stroke="#333" stroke-width="3"/><path d="M225 88 L300 96 L228 106Z" fill="#f5a623"/></svg>';
         return send(res, { choices: [{ message: { content: '```svg\n' + svg + '\n```' } }], usage: { prompt_tokens: 40, completion_tokens: 600, completion_tokens_details: { reasoning_tokens: 100 } } });
       }
-      if (prompt.includes('糖果')) {
-        const txt = '分析：要保证同时拥有不同形状的苹果味和桃子味的糖，考虑最坏情形。' + '最坏情况下先摸出所有西瓜味(12个)、全部圆形苹果味(7个)与全部圆形桃子味(9个)……' .repeat(4) + '因此最少需要取出 21 个糖果才能保证。';
-        return send(res, { choices: [{ message: { content: txt } }], usage: { prompt_tokens: 200, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 150 } } });
-      }
       return send(res, { choices: [{ message: { content: 'Hello' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
     }
     send(res, { success: false, message: 'not found' }, 404);

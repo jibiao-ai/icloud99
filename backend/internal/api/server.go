@@ -32,6 +32,7 @@ type Server struct {
 	Limiter *auth.Limiter
 	HTTP    *http.Client
 	CST     *time.Location
+	iqJob   iqJob
 }
 
 type ctxKey int
@@ -127,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/iq/stats", s.guard("iq:view", s.iqStats))
 	mux.Handle("GET /api/iq/schedule", s.guard("iq:view", s.iqSchedule))
 	mux.Handle("POST /api/iq/run", s.guard("iq:run", s.iqRun))
+	mux.Handle("GET /api/iq/run/status", s.guard("iq:view", s.iqRunStatus))
 
 	// 令牌用量查询（访客可用：用户自带令牌 Key）
 	mux.Handle("POST /api/token-usage/query", s.guard("token:query", s.tokenQuery))

@@ -24,7 +24,7 @@ New API（api.icloud99.cn）AI 渠道可视化监控平台：渠道状态、智�
 ## 接口
 `GET /api/health` · `POST /api/auth/login` · `GET /api/auth/me` · `GET /api/public/portal-info`
 `GET /api/channels` · `GET /api/channels/{id}/detail` · `POST /api/channels/test/{start|stop}` · `GET /api/channels/test/status` · `POST /api/channels/{seed|cleanup}`
-`GET /api/iq/{tests|stats|schedule}` · `POST /api/iq/run` · `POST /api/token-usage/query`
+`GET /api/iq/{tests|stats|schedule|run/status}` · `POST /api/iq/run`（后台异步执行鹈鹕骑行 SVG 动画检测，约 2~3 分钟，页面轮询状态；失败原因写入审计日志与检测记录）· `POST /api/token-usage/query`
 `GET /api/usage/{summary|export}` · `GET /api/usage/user/{name}[/logs]`
 `GET|PUT /api/settings` · `GET|PUT /api/settings/channel-keys` · `GET|PUT /api/settings/newapi` · `POST /api/settings/newapi/test` · `POST /api/settings/password` · `GET /api/audit-logs`
 统一信封 `{code,message,data}`；字段校验失败 HTTP 400 / code 40001 / `data.fields`；未配置 code 40002。
