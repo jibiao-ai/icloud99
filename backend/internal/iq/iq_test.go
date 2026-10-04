@@ -116,3 +116,74 @@ func TestNextRun(t *testing.T) {
 		t.Fatal("空窗口应无下次")
 	}
 }
+
+func sseServer(t *testing.T, parts ...string) string {
+	_, url := chatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		if b["stream"] != true {
+			t.Errorf("应使用流式请求")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, p := range parts {
+			j, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": p}}}})
+			w.Write([]byte("data: " + string(j) + "\n\n"))
+		}
+		w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":7,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\ndata: [DONE]\n\n"))
+	})
+	return url
+}
+
+func TestRunStream(t *testing.T) {
+	svg := "<svg>" + strings.Repeat(`<circle r="1"/>`, 20) + "<style>@keyframes a{to{opacity:0}}</style></svg>"
+	url := sseServer(t, "好的 ", svg[:50], svg[50:])
+	res := Run(context.Background(), &http.Client{}, url, "k", "m")
+	if res.Err != nil || res.Result != "pass" || !res.HasSVG || res.OutputTokens != 7 || res.InputTokens != 3 || res.ReasoningTokens != 2 {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestRunRetriesGateway524(t *testing.T) {
+	RetryDelay = 10 * time.Millisecond
+	svg := "<svg>" + strings.Repeat(`<circle r="1"/>`, 20) + "<style>@keyframes a{to{opacity:0}}</style></svg>"
+	body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": svg}}}})
+	n := 0
+	_, url := chatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n < 3 {
+			http.Error(w, "gateway timeout", 524)
+			return
+		}
+		w.Write(body)
+	})
+	res := Run(context.Background(), &http.Client{}, url, "k", "m")
+	if res.Err != nil || res.Result != "pass" || n != 3 {
+		t.Fatalf("n=%d %+v", n, res)
+	}
+}
+
+func TestRunPersistentUpstreamFailure(t *testing.T) {
+	RetryDelay = 10 * time.Millisecond
+	n := 0
+	_, url := chatServer(t, func(w http.ResponseWriter, r *http.Request) { n++; http.Error(w, "x", 524) })
+	res := Run(context.Background(), &http.Client{}, url, "k", "m")
+	if res.Err == nil || n != MaxAttempts {
+		t.Fatalf("n=%d %+v", n, res)
+	}
+	n = 0
+	_, url = chatServer(t, func(w http.ResponseWriter, r *http.Request) { n++; http.Error(w, "bad key", 401) })
+	if res := Run(context.Background(), &http.Client{}, url, "k", "m"); res.Err == nil || n != 1 {
+		t.Fatalf("鉴权失败不应重试 n=%d", n)
+	}
+}
+
+func TestRunModelWithoutSVGRetriesThenDegraded(t *testing.T) {
+	RetryDelay = 10 * time.Millisecond
+	body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": "抱歉，我无法生成"}}}})
+	n := 0
+	_, url := chatServer(t, func(w http.ResponseWriter, r *http.Request) { n++; w.Write(body) })
+	res := Run(context.Background(), &http.Client{}, url, "k", "m")
+	if res.Err != nil || res.Result != "degraded" || res.HasSVG || n != MaxAttempts {
+		t.Fatalf("n=%d %+v", n, res)
+	}
+}

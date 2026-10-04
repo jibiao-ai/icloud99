@@ -2,6 +2,7 @@
 package iq
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -80,13 +81,17 @@ func NextRun(now time.Time, tier string, start, end int, loc *time.Location) (ti
 	return time.Time{}, false
 }
 
-type chatResp struct {
+// chunk 同时兼容流式增量（delta）与非流式完整（message）响应。
+type chunk struct {
 	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
-	Usage struct {
+	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		Details          struct {
@@ -95,17 +100,53 @@ type chatResp struct {
 	} `json:"usage"`
 }
 
-// ChatTimeout 单次上游调用超时（SVG 生成实测 2~5 分钟，波动较大）。
-const ChatTimeout = 600 * time.Second
+const (
+	// ChatTimeout 单次上游调用总超时。
+	ChatTimeout = 600 * time.Second
+	// IdleTimeout 流式响应中允许的最长无数据间隔。
+	IdleTimeout = 300 * time.Second
+	// MaxAttempts 失败（上游故障或未产出 SVG）时的最大尝试次数。
+	MaxAttempts = 3
+)
 
-// Chat 调用 OpenAI 兼容 chat/completions。
+// RetryDelay 重试间隔（测试可调小）。
+var RetryDelay = 8 * time.Second
+
+// HTTPError 上游返回非 200。
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("上游返回 HTTP %d: %s", e.Status, e.Body) }
+
+// Retryable 网关超时/5xx/429 等可重试。
+func (e *HTTPError) Retryable() bool { return e.Status >= 500 || e.Status == 429 || e.Status == 408 }
+
+func trunc(s string, n int) string {
+	if r := []rune(strings.TrimSpace(s)); len(r) > n {
+		return string(r[:n])
+	}
+	return strings.TrimSpace(s)
+}
+
+// Chat 以流式调用 OpenAI 兼容 chat/completions（避免非流式长时间无响应被网关 524 切断）。
+// timeout 为总超时；流中超过 IdleTimeout 无数据则中止。上游不支持流式而直接返回 JSON 时同样兼容。
 func Chat(ctx context.Context, hc *http.Client, baseURL, key, model, prompt string, maxTokens int, timeout time.Duration) (content string, in, out, reasoning int, err error) {
-	body, _ := json.Marshal(map[string]any{"model": model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "max_tokens": maxTokens, "stream": false})
+	body, _ := json.Marshal(map[string]any{"model": model, "messages": []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens": maxTokens, "stream": true, "stream_options": map[string]any{"include_usage": true}})
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(cctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/v1/chat/completions", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	fail := func(e error) (string, int, int, int, error) {
+		if errors.Is(cctx.Err(), context.DeadlineExceeded) || errors.Is(e, context.DeadlineExceeded) {
+			return content, in, out, reasoning, fmt.Errorf("上游响应超时（>%ds）", int(timeout.Seconds()))
+		}
+		return content, in, out, reasoning, fmt.Errorf("上游连接中断: %w", e)
+	}
 	resp, err := hc.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -114,38 +155,104 @@ func Chat(ctx context.Context, hc *http.Client, baseURL, key, model, prompt stri
 		return "", 0, 0, 0, fmt.Errorf("连接上游失败: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode != 200 {
-		msg := strings.TrimSpace(string(raw))
-		if r := []rune(msg); len(r) > 160 {
-			msg = string(r[:160])
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", 0, 0, 0, &HTTPError{Status: resp.StatusCode, Body: trunc(string(raw), 160)}
+	}
+	// 空闲看门狗：每收到数据重置计时。
+	idle := time.AfterFunc(IdleTimeout, cancel)
+	defer idle.Stop()
+	apply := func(c *chunk) {
+		if len(c.Choices) > 0 {
+			content += c.Choices[0].Delta.Content + c.Choices[0].Message.Content
 		}
-		return "", 0, 0, 0, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, msg)
+		if c.Usage != nil {
+			in, out, reasoning = c.Usage.PromptTokens, c.Usage.CompletionTokens, c.Usage.Details.Reasoning
+		}
 	}
-	var r chatResp
-	if err := json.Unmarshal(raw, &r); err != nil {
-		return "", 0, 0, 0, fmt.Errorf("响应解析失败")
+	if !strings.Contains(resp.Header.Get("Content-Type"), "event-stream") { // 上游忽略 stream，直接返回 JSON
+		raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		if rerr != nil {
+			return fail(rerr)
+		}
+		var c chunk
+		if json.Unmarshal(raw, &c) != nil {
+			return "", 0, 0, 0, fmt.Errorf("响应解析失败")
+		}
+		apply(&c)
+		return content, in, out, reasoning, nil
 	}
-	if len(r.Choices) > 0 {
-		content = r.Choices[0].Message.Content
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 64<<10), 8<<20)
+	done := false
+	for sc.Scan() {
+		idle.Reset(IdleTimeout)
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			done = true
+			break
+		}
+		var c chunk
+		if json.Unmarshal([]byte(data), &c) != nil {
+			continue
+		}
+		apply(&c)
 	}
-	return content, r.Usage.PromptTokens, r.Usage.CompletionTokens, r.Usage.Details.Reasoning, nil
+	if err := sc.Err(); err != nil {
+		return fail(err)
+	}
+	if !done && content == "" {
+		if cctx.Err() != nil {
+			return fail(cctx.Err())
+		}
+		return "", in, out, reasoning, fmt.Errorf("上游流式响应为空")
+	}
+	return content, in, out, reasoning, nil
 }
 
-// Run 调用上游生成鹈鹕骑行 SVG 并评分。上游失败不 panic，返回降智记录并带 Err。
+// retryable 判断失败是否值得重试（鉴权/参数类 4xx 不重试）。
+func retryable(err error) bool {
+	var he *HTTPError
+	if errors.As(err, &he) {
+		return he.Retryable()
+	}
+	return true
+}
+
+// Run 调用上游生成鹈鹕骑行 SVG 并评分。上游故障或未产出 SVG 时自动重试（最多 MaxAttempts 次）。
+// 返回 Err != nil 表示上游一直故障（属于基础设施问题，调用方不应记为“降智”）；
+// Err == nil 且 HasSVG=false 表示上游正常应答但模型多次均未给出 SVG（真实的降智表现）。
 func Run(ctx context.Context, hc *http.Client, baseURL, key, model string) Result {
-	t0 := time.Now()
-	content, in, out, reasoning, err := Chat(ctx, hc, baseURL, key, model, SVGPrompt, 16000, ChatTimeout)
-	ms := int(time.Since(t0).Milliseconds())
-	if err != nil {
-		return Result{Result: "degraded", RawResponse: "Error: " + err.Error(), ResponseTimeMs: ms, InputTokens: in, OutputTokens: out, ReasoningTokens: reasoning, Err: err}
+	var res Result
+	for attempt := 1; attempt <= MaxAttempts; attempt++ {
+		t0 := time.Now()
+		content, in, out, reasoning, err := Chat(ctx, hc, baseURL, key, model, SVGPrompt, 16000, ChatTimeout)
+		ms := int(time.Since(t0).Milliseconds())
+		if err != nil {
+			res = Result{Result: "degraded", RawResponse: "Error: " + err.Error(), ResponseTimeMs: ms, InputTokens: in, OutputTokens: out, ReasoningTokens: reasoning, Err: err}
+			if !retryable(err) || ctx.Err() != nil {
+				return res
+			}
+		} else {
+			svg := ExtractSVG(content)
+			verdict, score := ScoreSVG(svg)
+			res = Result{Result: verdict, Score: score, RawResponse: trunc(content, 2000), SVG: svg, HasSVG: svg != "",
+				ReasoningTokens: reasoning, InputTokens: in, OutputTokens: out, ResponseTimeMs: ms}
+			if verdict != "degraded" {
+				return res
+			}
+		}
+		if attempt < MaxAttempts {
+			select {
+			case <-ctx.Done():
+				return res
+			case <-time.After(RetryDelay):
+			}
+		}
 	}
-	svg := ExtractSVG(content)
-	res, score := ScoreSVG(svg)
-	raw := content
-	if r := []rune(raw); len(r) > 2000 {
-		raw = string(r[:2000])
-	}
-	return Result{Result: res, Score: score, RawResponse: raw, SVG: svg, HasSVG: svg != "",
-		ReasoningTokens: reasoning, InputTokens: in, OutputTokens: out, ResponseTimeMs: ms}
+	return res
 }

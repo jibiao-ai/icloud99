@@ -144,7 +144,7 @@ type iqJob struct {
 }
 
 // RunIQ 执行一次检测并落库（手动与定时任务共用，不依赖 HTTP 请求）。
-// 上游失败时同样落一条降智记录（含错误原因），并返回错误以便审计标记失败。
+// 上游故障（重试后仍失败）不落检测记录，只返回错误；模型正常应答但多次无 SVG 才记为降智。
 func (s *Server) RunIQ(ctx context.Context, tier string) (map[string]any, error) {
 	model := s.Store.Setting(ctx, "iq.model", "gpt-6-astra")
 	key, err := s.Store.GetChannelKey(ctx, "openai", tier)
@@ -155,6 +155,10 @@ func (s *Server) RunIQ(ctx context.Context, tier string) (map[string]any, error)
 		return nil, err
 	}
 	res := iq.Run(ctx, &http.Client{}, key.BaseURL, key.APIKey, model)
+	if res.Err != nil {
+		// 上游故障（网关超时/5xx/连接中断）重试后仍失败：不是模型降智，不写检测记录，仅返回错误由审计日志记录
+		return map[string]any{"tier": tier, "model": model, "responseTimeMs": res.ResponseTimeMs, "error": res.Err.Error()}, res.Err
+	}
 	// 入库使用独立上下文，避免上游超时后 ctx 已过期导致记录丢失
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
@@ -164,12 +168,7 @@ func (s *Server) RunIQ(ctx context.Context, tier string) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]any{"tier": tier, "model": model, "result": res.Result, "score": res.Score, "responseTimeMs": res.ResponseTimeMs, "hasSvg": res.HasSVG}
-	if res.Err != nil {
-		out["error"] = res.Err.Error()
-		return out, res.Err
-	}
-	return out, nil
+	return map[string]any{"tier": tier, "model": model, "result": res.Result, "score": res.Score, "responseTimeMs": res.ResponseTimeMs, "hasSvg": res.HasSVG}, nil
 }
 
 // startIQ 在后台启动一次检测（SVG 生成需 2~3 分钟，不能占用 HTTP 请求）。
@@ -185,7 +184,7 @@ func (s *Server) startIQ(tier, user, ip string) bool {
 	j.mu.Unlock()
 	go func() {
 		t0 := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), iq.ChatTimeout+30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(iq.MaxAttempts)*(iq.ChatTimeout+iq.RetryDelay)+30*time.Second)
 		defer cancel()
 		out, err := s.RunIQ(ctx, tier)
 		if err != nil {
