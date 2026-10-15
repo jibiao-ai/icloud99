@@ -139,6 +139,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/usage/user/{username}/logs", s.guard("usage:view", s.usageUserLogs))
 	mux.Handle("GET /api/usage/export", s.guard("usage:export", s.usageExport))
 
+	// 费用账单（仅管理员：bill:export）
+	mux.Handle("GET /api/bill/accounts", s.guard("bill:export", s.billAccounts))
+	mux.Handle("GET /api/bill/draft", s.guard("bill:export", s.billDraft))
+	mux.Handle("POST /api/bill/export", s.guard("bill:export", s.billExport))
+
 	// 管理设置
 	mux.Handle("GET /api/settings", s.guard("settings:view", s.settingsGet))
 	mux.Handle("PUT /api/settings", s.guard("settings:edit", s.settingsPut))

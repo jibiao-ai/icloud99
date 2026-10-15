@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, Users } from 'lucide-react';
+import { FileText, RefreshCw, Users } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { usageApi } from '../services/api';
 import { useAsync } from '../hooks/useAsync';
@@ -15,6 +15,7 @@ import Charts from '../components/usage/Charts';
 import UserTable from '../components/usage/UserTable';
 import UserDetailModal from '../components/usage/UserDetailModal';
 import ExportOptions from '../components/usage/ExportOptions';
+import BillExportModal from '../components/bill/BillExportModal';
 import { MAX_DAYS, daysBetween, matchPreset, presetRange } from '../components/usage/periods';
 import { useToast } from '../components/Toast';
 import { fmtDateTime } from '../utils/format';
@@ -22,6 +23,8 @@ import { fmtDateTime } from '../utils/format';
 /** 用量统计：周期、筛选同步到地址栏，刷新与分享均可还原。 */
 export default function UsageStatsPage() {
   const can = useCan('usage:view');
+  const canBill = useCan('bill:export');
+  const [billOpen, setBillOpen] = useState(false);
   const [sp, setSp] = useSearchParams();
   const def = useMemo(() => presetRange('month'), []);
   const start = sp.get('start') || def.start;
@@ -75,9 +78,12 @@ export default function UsageStatsPage() {
       <PageHeader
         icon={Users} title="用量统计 · 全站用户账单" description="在指定周期内统计 New API 全站所有用户的消费账单，并与后台口径自动对账（北京时间）。数据带缓存，请勿频繁刷新"
         actions={(
-          <LoadingButton className="btn-default btn-sm" icon={RefreshCw} loading={refreshing || loading} disabled={left > 0} onClick={refresh} title="为保护上游接口，手动刷新有冷却时间">
-            {left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} 后可刷新` : '刷新数据'}
-          </LoadingButton>
+          <div className="flex items-center gap-2">
+            {canBill && <button type="button" className="btn-default btn-sm" onClick={() => setBillOpen(true)}><FileText size={15} />导出账单 PDF</button>}
+            <LoadingButton className="btn-default btn-sm" icon={RefreshCw} loading={refreshing || loading} disabled={left > 0} onClick={refresh} title="为保护上游接口，手动刷新有冷却时间">
+              {left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} 后可刷新` : '刷新数据'}
+            </LoadingButton>
+          </div>
         )}
       />
       <PeriodBar start={start} end={end} preset={preset} onChange={setPeriod} />
@@ -102,6 +108,7 @@ export default function UsageStatsPage() {
           )}
         </>
       )}
+      {canBill && <BillExportModal open={billOpen} onClose={() => setBillOpen(false)} />}
       <UserDetailModal user={detailUser} range={{ start, end }} onClose={() => setDetailUser(null)} />
     </div>
   );

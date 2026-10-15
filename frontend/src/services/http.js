@@ -39,10 +39,18 @@ http.interceptors.response.use(
   async (err) => { throw await toError(err); },
 );
 
-/** 下载 blob，并解析文件名（优先 filename*）。 */
-export async function blob(url, params) {
-  const res = await http.get(url, { params, responseType: 'blob' });
+const fileOf = (res, def) => {
   const cd = res.headers['content-disposition'] || '';
   const m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
-  return { blob: res.data, filename: m ? decodeURIComponent(m[1]) : 'download.xlsx' };
+  return { blob: res.data, filename: m ? decodeURIComponent(m[1]) : def };
+};
+
+/** 下载 blob，并解析文件名（优先 filename*）。 */
+export async function blob(url, params) {
+  return fileOf(await http.get(url, { params, responseType: 'blob' }), 'download.xlsx');
+}
+
+/** POST 提交 JSON 并下载 blob（如按定制内容生成 PDF）。 */
+export async function postBlob(url, body, def = 'download.pdf') {
+  return fileOf(await http.post(url, body, { responseType: 'blob' }), def);
 }

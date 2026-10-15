@@ -278,7 +278,7 @@ func BuildDetail(username string, p Period, cur Currency, rows []newapi.QuotaRow
 		m.Tokens += r.TokenUsed
 	}
 	t.Amount = cur.Money(t.Quota)
-	out := UserDetail{Username: username, Period: p, Currency: cur, Totals: t}
+	out := UserDetail{Username: username, Period: p, Currency: cur, Totals: t, Daily: []DetailDaily{}, Models: []DetailModel{}}
 	for _, d := range order {
 		x := *days[d]
 		x.Amount = cur.Money(x.Quota)

@@ -243,7 +243,7 @@ try {
   await page.waitForTimeout(1500);
   check(page.url().includes('start=') && page.url().includes('end='), '周期同步到地址栏');
   // 用户详情
-  await page.getByRole('button', { name: '详情' }).first().click();
+  await page.locator('tbody tr', { hasText: 'alice' }).getByRole('button', { name: '详情' }).click();
   await page.getByRole('dialog').waitFor();
   await page.waitForTimeout(1200);
   await shot('16-usage-user-detail');
@@ -256,12 +256,42 @@ try {
   await page.getByText('周期总消费').waitFor();
   await page.waitForTimeout(1200);
   await page.getByRole('checkbox', { name: '包含调用明细' }).click();
-  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.getByRole('button', { name: /导出/ }).first().click()]);
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.getByRole('button', { name: /导出 Excel|导出当前筛选/ }).first().click()]);
   const fp = `${OUT}export.xlsx`;
   await dl.saveAs(fp);
   // 无头 Chromium 对 blob 下载的中文文件名会回退为 download，故以前端解析结果（Toast）为准
   const dlName = await page.getByText(/已导出 .*\.xlsx/).first().innerText();
   check(dlName.includes('用户用量账单') && dlName.includes('2026-09-01'), `导出文件名：${dlName}`);
+
+  // ───────── 账单 PDF 导出（仅管理员）─────────
+  title('账单导出 PDF：选择 -> 草稿 -> 定制 -> 下载');
+  await go('/usage?start=2026-09-01&end=2026-10-03');
+  await page.getByText('周期总消费').waitFor();
+  await page.getByRole('button', { name: '导出账单 PDF' }).click();
+  await page.getByRole('dialog').waitFor();
+  await pick('账号', 'alice');
+  await page.getByRole('combobox', { name: '账单月份' }).click();
+  await page.getByRole('option').nth(0).click();
+  await page.getByRole('heading', { name: '导出账单 PDF' }).click();
+  await page.getByRole('button', { name: '生成账单' }).click();
+  await page.locator('#bill-title').waitFor({ timeout: 20000 });
+  check((await page.locator('#bill-company').inputValue()) === '元擎智算', '草稿默认公司名为元擎智算');
+  check(await page.getByRole('combobox', { name: /开始日期/ }).first().isVisible() || await page.getByRole('button', { name: /开始日期/ }).first().isVisible(), '月度汇总含开始/截止日期选择');
+  await page.locator('#bill-title').fill('定制账单');
+  await page.getByRole('textbox', { name: /优惠金额/ }).first().fill('1.5');
+  await shot('20-bill-editor');
+  const [pdf] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.getByRole('button', { name: '导出 PDF' }).click()]);
+  const pdfPath = `${OUT}bill.pdf`;
+  await pdf.saveAs(pdfPath);
+  const head = (await import('node:fs')).readFileSync(pdfPath).subarray(0, 5).toString();
+  check(head === '%PDF-', `下载内容为 PDF（${head}）`);
+  check(/已导出 .*\.pdf/.test(await toastText()), '导出成功提示含 .pdf 文件名');
+  await page.getByRole('textbox', { name: /费用总额/ }).first().fill('1');
+  await page.getByRole('textbox', { name: /优惠金额/ }).first().fill('9');
+  await page.getByRole('button', { name: '导出 PDF' }).click();
+  await page.waitForTimeout(800);
+  check(await page.getByText('优惠金额应在').first().isVisible(), '优惠金额超过总额：字段级错误提示');
+  await page.keyboard.press('Escape');
 
   // ───────── 8 审计 & 安全 ─────────
   title('审计日志：脱敏 + 筛选');
@@ -304,6 +334,9 @@ try {
   check(await page.getByText('管理员登录').first().isVisible(), '退出后回到登录表单');
   await go('/usage');
   check(await page.getByText('需要管理员权限').isVisible(), '匿名访问 /usage 显示无权限引导');
+  check((await page.getByRole('button', { name: '导出账单 PDF' }).count()) === 0, '匿名用户看不到导出账单入口');
+  const anon = await page.evaluate(async () => (await fetch('/api/bill/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status);
+  check(anon === 401, `匿名调用账单导出接口被拒（${anon}）`);
   // 联系我们：匿名访客也应看到「令牌查询的 New API 地址」作为 API 域名
   await go('/contact');
   const apiRow = await page.locator('dt', { hasText: 'API 域名' }).locator('xpath=..').innerText();

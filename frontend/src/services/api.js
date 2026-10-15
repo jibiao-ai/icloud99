@@ -1,5 +1,5 @@
 // 所有后端接口的唯一出口（铁律7）：页面不得直接 fetch/axios。
-import { http, blob } from './http';
+import { http, blob, postBlob } from './http';
 
 export { bindAuth, ApiError } from './http';
 
@@ -37,6 +37,12 @@ export const usageApi = {
   user: (name, params) => http.get(`/usage/user/${encodeURIComponent(name)}`, { params }),
   userLogs: (name, params) => http.get(`/usage/user/${encodeURIComponent(name)}/logs`, { params }),
   exportXlsx: (params) => blob('/usage/export', params),
+};
+
+export const billApi = {
+  accounts: () => http.get('/bill/accounts'),
+  draft: (params) => http.get('/bill/draft', { params }),
+  exportPdf: (doc) => postBlob('/bill/export', doc, 'bill.pdf'),
 };
 
 export const settingsApi = {

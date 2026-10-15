@@ -12,6 +12,7 @@ const (
 	RadarView      = "radar:view"
 	UsageView      = "usage:view"
 	UsageExport    = "usage:export"
+	BillExport     = "bill:export"
 	SettingsView   = "settings:view"
 	SettingsEdit   = "settings:edit"
 	AuditView      = "audit:view"
@@ -45,7 +46,7 @@ var Anonymous = []string{ChannelView, IQView, TokenQuery, ContactView, RadarView
 // Admin 管理员拥有全部权限。
 var Admin = []string{
 	ChannelView, ChannelTest, ChannelManage, IQView, IQRun, TokenQuery, ContactView, RadarView,
-	UsageView, UsageExport, SettingsView, SettingsEdit, AuditView, PasswordChange,
+	UsageView, UsageExport, BillExport, SettingsView, SettingsEdit, AuditView, PasswordChange,
 }
 
 // Set 将切片转换为集合。
