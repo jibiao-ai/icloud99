@@ -213,7 +213,17 @@ func TestWriterSplitsFilesAndMatchesReferenceFormat(t *testing.T) {
 			t.Fatalf("表头第 %d 列应为 %s 实为 %s", i, h, rows[0][i])
 		}
 	}
-	if len(Headers) != 21 || rows[1][3] != "妙妙喵" || rows[1][1] != "2001" {
+	for _, gone := range []string{"channel", "channel_name", "request_id", "upstream_request_id", "ip"} {
+		for _, h := range Headers {
+			if h == gone {
+				t.Fatalf("表头不应再包含 %s", gone)
+			}
+		}
+	}
+	if len(rows[0]) != 16 || len(colWidths) != len(Headers) {
+		t.Fatalf("应为 16 列且列宽数量一致: 表头 %d 列宽 %d 实际列 %d", len(Headers), len(colWidths), len(rows[0]))
+	}
+	if len(Headers) != 16 || rows[1][3] != "妙妙喵" || rows[1][1] != "2001" {
 		t.Fatalf("数据行: %v", rows[1])
 	}
 }

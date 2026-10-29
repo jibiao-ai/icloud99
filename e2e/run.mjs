@@ -322,6 +322,11 @@ try {
   await xl.saveAs(xlPath);
   const xbuf = (await import('node:fs')).readFileSync(xlPath);
   check(xbuf.subarray(0, 2).toString() === 'PK' && xbuf.length > 1000, `下载内容为 xlsx（${xbuf.length} 字节）`);
+  // 表头：16 列，且不含 channel / channel_name / request_id / upstream_request_id / ip
+  const { execFileSync } = await import('node:child_process');
+  const hdr = execFileSync('python3', ['-c', 'import sys,openpyxl;ws=openpyxl.load_workbook(sys.argv[1]).active;print(",".join(str(c.value) for c in next(ws.iter_rows(min_row=1,max_row=1))))', xlPath]).toString().trim().split(',');
+  check(hdr.length === 16 && hdr[0] === 'time' && hdr[hdr.length - 1] === 'content', `Excel 共 ${hdr.length} 列：${hdr.join('/')}`);
+  check(!['channel', 'channel_name', 'request_id', 'upstream_request_id', 'ip'].some((c) => hdr.includes(c)), 'Excel 不含 channel/channel_name/request_id/upstream_request_id/ip 列');
   const anonDetail = await fetch(`${BASE}/api/detail/export/status`);
   check(anonDetail.status === 401, `匿名访问明细导出接口被拒（HTTP ${anonDetail.status}）`);
 

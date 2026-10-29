@@ -330,9 +330,9 @@ type Row struct {
 	Content     string
 }
 
-// Headers 表头（与附件逐列一致）。
+// Headers 导出表头（在附件格式基础上去掉 channel / channel_name / request_id / upstream_request_id / ip 五列）。
 var Headers = []string{"time", "log_id", "user_id", "username", "token_name", "group", "model", "prompt_tokens", "completion_tokens",
-	"total_tokens", "quota", "cost_usd", "log_type", "channel", "channel_name", "request_id", "upstream_request_id", "use_time", "is_stream", "ip", "content"}
+	"total_tokens", "quota", "cost_usd", "log_type", "use_time", "is_stream", "content"}
 
 // ToRow 把 New API 日志转换为导出行。
 func ToRow(it newapi.LogItem, qpu float64) Row {

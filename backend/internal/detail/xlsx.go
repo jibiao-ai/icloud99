@@ -52,7 +52,7 @@ func NewWriter(dir, base, sheet string, perFile int) *Writer {
 	return &Writer{dir: dir, base: base, sheet: sheet, perFile: ClampPerFile(perFile)}
 }
 
-var colWidths = []float64{20, 10, 9, 16, 18, 12, 24, 14, 18, 14, 10, 12, 9, 9, 16, 44, 32, 9, 10, 16, 30}
+var colWidths = []float64{20, 10, 9, 16, 18, 12, 24, 14, 18, 14, 10, 12, 9, 9, 10, 30}
 
 func (w *Writer) open() error {
 	f := excelize.NewFile()
@@ -129,7 +129,7 @@ func (w *Writer) Add(r Row) error {
 		}
 	}
 	vals := []interface{}{r.Time, r.LogID, r.UserID, nz(r.Username), nz(r.TokenName), nz(r.Group), nz(r.Model), r.Prompt, r.Completion,
-		r.Total, r.Quota, r.CostUSD, r.LogType, r.Channel, nz(r.ChannelName), nz(r.RequestID), nz(r.UpstreamID), r.UseTime, r.IsStream, nz(r.IP), nz(r.Content)}
+		r.Total, r.Quota, r.CostUSD, r.LogType, r.UseTime, r.IsStream, nz(r.Content)}
 	if err := w.sw.SetRow(fmt.Sprintf("A%d", w.n+2), vals, excelize.RowOpts{StyleID: w.body}); err != nil {
 		return err
 	}

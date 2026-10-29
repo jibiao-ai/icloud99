@@ -83,7 +83,7 @@ export default function DetailExportPage() {
       {st && st.phase !== 'idle' && <DetailProgress st={st} />}
       {st && <DetailFiles st={st} />}
       <aside className="text-[11px] text-fg-subtle space-y-1">
-        <p>列：时间、日志ID、用户ID、用户名、令牌名称、分组、模型、输入/输出/总 Token、额度、费用(USD)、类型、渠道、渠道名称、请求ID、上游请求ID、用时、是否流式、IP、内容。</p>
+        <p>列：时间、日志ID、用户ID、用户名、令牌名称、分组、模型、输入/输出/总 Token、额度、费用(USD)、类型、用时、是否流式、内容（共 16 列）。</p>
         <p>限制：同一时间仅允许一个导出任务；首次导出较早周期需要先同步到本地库，耗时取决于数据量与上游限速，失败或取消后已同步的天会保留，重试只补剩余部分；单次最多约 200 万行；文件在服务器保留 2 小时后自动清理。</p>
       </aside>
     </div>
