@@ -5,3 +5,5 @@ sudo mariadb -e "DROP DATABASE IF EXISTS icloud99; CREATE DATABASE icloud99 CHAR
 pm2 restart icloud99-api >/dev/null 2>&1
 for i in 1 2 3 4 5 6 7 8 9 10; do curl -sf localhost:8080/api/health >/dev/null && break; sleep 1; done
 sudo mariadb icloud99 -e "UPDATE settings SET v='' WHERE k='site.token_base_url'"
+# 明细本地库：e2e 把上游限速调高，缩短整月同步耗时
+sudo mariadb icloud99 -e "UPDATE settings SET v='300' WHERE k='detail.rate_limit'"

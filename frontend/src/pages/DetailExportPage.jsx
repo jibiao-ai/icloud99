@@ -9,6 +9,7 @@ import ErrorState from '../components/ErrorState';
 import DetailForm from '../components/detail/DetailForm';
 import DetailProgress from '../components/detail/DetailProgress';
 import DetailFiles from '../components/detail/DetailFiles';
+import LocalStatus from '../components/detail/LocalStatus';
 import { useDetailJob } from '../components/detail/useDetailJob';
 import { MAX_DAYS, daysBetween, presetRange } from '../components/usage/periods';
 import { useToast } from '../components/Toast';
@@ -22,6 +23,7 @@ export default function DetailExportPage() {
   const [accounts, setAccounts] = useState([]);
   const [errs, setErrs] = useState({});
   const [busy, setBusy] = useState(false);
+  const [local, setLocal] = useState(null);
   const { st, error, running, refresh } = useDetailJob(can);
 
   useEffect(() => {
@@ -30,6 +32,17 @@ export default function DetailExportPage() {
     detailApi.accounts().then((r) => { if (alive) setAccounts(r.accounts || []); }).catch(() => {});
     return () => { alive = false; };
   }, [can]);
+
+  // 本地库概况：进入页面加载一次，导出结束或运行中每 5 秒刷新
+  useEffect(() => {
+    if (!can) return undefined;
+    let alive = true;
+    const load = () => detailApi.local().then((r) => { if (alive) setLocal(r); }).catch(() => {});
+    load();
+    if (!running) return () => { alive = false; };
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, [can, running, st?.phase]);
 
   useEffect(() => {
     if (st?.phase === 'done' && !running) toast.success('明细导出完成，可下载文件');
@@ -62,15 +75,16 @@ export default function DetailExportPage() {
     <div className="fade-in">
       <PageHeader
         icon={FileSpreadsheet} title="使用明细导出"
-        description="按周期导出平台用户的 API 调用明细（北京时间）。数据量可能超过 New API 单次查询上限，系统会按天自动分段、必要时二分后再合并，写入 Excel 时按时间升序排列"
+        description="按周期导出平台用户的 API 调用明细（北京时间）。明细会提前同步到本地库，导出只补缺少的天；上游限流（429）时自动暂停重试，不会因此失败，写入 Excel 时按时间升序排列"
       />
+      <LocalStatus info={local} />
       <DetailForm value={form} onChange={setForm} accounts={accounts} errs={errs} busy={busy} running={running} onStart={start} onCancel={cancel} />
       {error && <div className="card mb-4"><ErrorState error={error} onRetry={refresh} /></div>}
       {st && st.phase !== 'idle' && <DetailProgress st={st} />}
       {st && <DetailFiles st={st} />}
       <aside className="text-[11px] text-fg-subtle space-y-1">
         <p>列：时间、日志ID、用户ID、用户名、令牌名称、分组、模型、输入/输出/总 Token、额度、费用(USD)、类型、渠道、渠道名称、请求ID、上游请求ID、用时、是否流式、IP、内容。</p>
-        <p>限制：同一时间仅允许一个导出任务；单次最多约 200 万行；文件在服务器保留 2 小时后自动清理。</p>
+        <p>限制：同一时间仅允许一个导出任务；首次导出较早周期需要先同步到本地库，耗时取决于数据量与上游限速，失败或取消后已同步的天会保留，重试只补剩余部分；单次最多约 200 万行；文件在服务器保留 2 小时后自动清理。</p>
       </aside>
     </div>
   );

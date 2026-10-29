@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"icloud99/internal/audit"
 	"icloud99/internal/auth"
+	"icloud99/internal/detail"
 	"icloud99/internal/httpx"
 	"icloud99/internal/monitor"
 	"icloud99/internal/newapi"
@@ -34,6 +36,12 @@ type Server struct {
 	CST       *time.Location
 	iqJob     iqJob
 	detailJob detailJob
+
+	// 使用明细本地库：同步闸门（同一时刻只有一个任务访问上游日志）、后台预同步状态、全局限速器
+	gate     syncGate
+	auto     autoSync
+	throttle *detail.Throttle
+	thrOnce  sync.Once
 }
 
 type ctxKey int
@@ -153,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 	// 使用明细导出（仅管理员：detail:export；后台分段拉取，页面轮询）
 	mux.Handle("GET /api/detail/accounts", s.guard("detail:export", s.billAccounts))
 	mux.Handle("POST /api/detail/export", s.guard("detail:export", s.detailStart))
+	mux.Handle("GET /api/detail/local", s.guard("detail:export", s.detailLocal))
 	mux.Handle("GET /api/detail/export/status", s.guard("detail:export", s.detailStatus))
 	mux.Handle("POST /api/detail/export/cancel", s.guard("detail:export", s.detailCancel))
 	mux.Handle("GET /api/detail/export/download", s.guard("detail:export", s.detailDownload))

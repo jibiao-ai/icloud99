@@ -47,6 +47,7 @@ export const billApi = {
 
 export const detailApi = {
   accounts: () => http.get('/detail/accounts'),
+  local: () => http.get('/detail/local'),
   start: (body) => http.post('/detail/export', body),
   status: () => http.get('/detail/export/status'),
   cancel: () => http.post('/detail/export/cancel'),

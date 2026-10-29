@@ -69,3 +69,19 @@ func TestValidateNewPassword(t *testing.T) {
 		t.Fatal("新旧相同应报错")
 	}
 }
+
+func TestValidateDetailSettings(t *testing.T) {
+	ok := map[string]string{"detail.sync_enabled": "1", "detail.sync_interval_minutes": "30", "detail.sync_days": "3",
+		"detail.retention_days": "180", "detail.rate_limit": "45"}
+	if e := ValidateSettings(ok); len(e) != 0 {
+		t.Fatalf("合法的明细设置不应报错: %v", e)
+	}
+	bad := map[string]string{"detail.sync_enabled": "yes", "detail.sync_interval_minutes": "1", "detail.sync_days": "0",
+		"detail.retention_days": "3", "detail.rate_limit": "1000"}
+	e := ValidateSettings(bad)
+	for k := range bad {
+		if e[k] == "" {
+			t.Errorf("%s 应报错", k)
+		}
+	}
+}

@@ -300,9 +300,22 @@ try {
   check(await page.getByRole('link', { name: '使用明细导出' }).first().isVisible(), '管理员菜单含「使用明细导出」');
   await pick('导出用户', 'alice');
   await page.getByRole('heading', { name: '使用明细导出' }).click();
+  // 模拟上游限流：接下来 2 次明细请求返回 429（Retry-After: 2）；导出应自动暂停等待后继续，而不是失败
+  await fetch('http://127.0.0.1:4010/__rate?n=2');
   await page.getByRole('button', { name: '开始导出' }).click();
-  await page.getByText('导出完成').first().waitFor({ timeout: 60000 });
-  check(await page.getByText(/导出文件（1 个/).isVisible(), '导出结果列出 1 个文件');
+  await page.getByText('导出完成').first().waitFor({ timeout: 90000 });
+  check(await page.getByText(/导出文件（1 个/).isVisible(), '遇到 429 后自动等待重试，导出仍完成并列出 1 个文件');
+  check(!(await page.locator('main').innerText()).includes('导出失败'), '限流期间没有出现「导出失败」');
+  await page.waitForTimeout(1500);
+  check(await page.getByText(/累计限流\s*[1-9]/).isVisible(), '本地库卡片显示累计限流次数');
+  check(await page.getByText('本地明细库').first().isVisible(), '页面展示本地明细库概况');
+  // 二次导出同一周期：本地库已完整，不应再请求上游
+  const calls1 = (await (await fetch('http://127.0.0.1:4010/__stats')).json()).logCalls;
+  await page.getByRole('button', { name: '开始导出' }).click();
+  await page.waitForTimeout(4000);
+  const calls2 = (await (await fetch('http://127.0.0.1:4010/__stats')).json()).logCalls;
+  check(calls2 === calls1, `二次导出读本地库，不再请求上游（明细请求数 ${calls1} -> ${calls2}）`);
+  await page.getByText('导出完成').first().waitFor({ timeout: 30000 });
   await shot('21-detail-export');
   const [xl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.getByRole('button', { name: '下载', exact: true }).first().click()]);
   const xlPath = `${OUT}detail.xlsx`;

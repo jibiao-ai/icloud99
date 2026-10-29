@@ -27,7 +27,18 @@ New API（api.icloud99.cn）AI 渠道可视化监控平台：渠道状态、智�
 `GET /api/iq/{tests|stats|schedule|run/status}` · `POST /api/iq/run`（后台异步、流式调用上游并自动重试的鹈鹕骑行 SVG 动画检测；上游故障不记为降智，约 2~5 分钟，页面轮询状态；失败原因写入审计日志与检测记录）· `POST /api/token-usage/query`
 `GET /api/usage/{summary|export}` · `GET /api/usage/user/{name}[/logs]`
 `GET /api/bill/accounts` · `GET /api/bill/draft?account=&months=2026-08,2026-09` · `POST /api/bill/export`（**仅管理员**，权限 `bill:export`：用量统计页「导出账单 PDF」，选账号与月份生成草稿，可在线修改标题/公司名/账号/各月起止日期/费用总额/优惠/明细行/备注，再由服务端渲染 A4 PDF，含元擎智算 logo、每月开始与截止日期、金额；字体与 logo 通过 `go:embed` 内置，生产镜像无需系统字体）
-`GET /api/detail/accounts` · `POST /api/detail/export`（body：`start,end,users[],rowsPerFile`）· `GET /api/detail/export/status` · `POST /api/detail/export/cancel` · `GET /api/detail/export/download?file=<name>|all`（**仅管理员**，权限 `detail:export`：菜单「使用明细导出」。按周期导出全站（或指定 ≤50 个）用户的调用明细为 Excel，列与格式同《Token账单_含明细.xlsx》（21 列、微软雅黑表头、时间升序、sheet 如「09月明细」）。**分段策略**：按北京时间自然日 × 用户切段，先取首页得到段内总数，超过 5000 条则按时间二分直到不超限，再逐页（100/页）拉取，按日志 id 去重、段间并发 3、失败重试、全程按时间有序合并；开始前预估总量，超过 200 万行直接拒绝。Excel 以流式写入（内存与行数无关），每文件默认 30 万行自动拆分，多文件下载为 zip。后台任务，同一时间仅 1 个，可取消，页面可断线恢复进度，文件保留 2 小时，完成后写审计）
+`GET /api/detail/accounts` · `POST /api/detail/export`（body：`start,end,users[],rowsPerFile`）· `GET /api/detail/export/status` · `POST /api/detail/export/cancel` · `GET /api/detail/export/download?file=<name>|all`（**仅管理员**，权限 `detail:export`：菜单「使用明细导出」。按周期导出全站（或指定 ≤50 个）用户的调用明细为 Excel，列与格式同《Token账单_含明细.xlsx》（21 列、微软雅黑表头、时间升序、sheet 如「09月明细」）。**本地库 + 分段策略**：导出不再实时全量拉取上游，而是先把缺少的天同步到本地库（见下），再从本地库流式写 Excel；同步某一天时按北京时间自然日 × 用户切段，先取首页得到段内总数，超过 5000 条则按时间二分直到不超限，再逐页（100/页）拉取，按日志 id 去重、段间并发 3、失败重试、全程按时间有序合并；写入前按本地库行数校验，超过 200 万行直接拒绝。Excel 以流式写入（内存与行数无关），每文件默认 30 万行自动拆分，多文件下载为 zip。后台任务，同一时间仅 1 个，可取消，页面可断线恢复进度，文件保留 2 小时，完成后写审计）
+`GET /api/detail/local`（**仅管理员**，`detail:export`：本地明细库概况 + 后台预同步状态 + 上游限流状态）
+
+**使用明细本地库（修复导出被 429 限流而失败）**
+- 表：`usage_logs`（按 `log_id` 幂等 upsert，索引 `(created_at,log_id)` / `(username,created_at,log_id)`）、`usage_log_days`（每个北京时间自然日一条同步水位 `synced_until`，水位 >= 当日 23:59:59 即视为该日完整；迁移 `0005_usage_logs.sql`）。
+- 后台预同步：调度器每分钟检查，默认每 30 分钟把「最近 3 天（含今天）」同步到本地库；已完整的天直接跳过，当天只做增量（向前回溯 300 秒，重复无害）；刚结束的一天留 300 秒窗口等延迟写入的日志，下一轮再标记完整。
+- 手动导出：先同步所选周期里本地库缺少的天（按天串行、每天完成立即记水位），再从本地库读取。因此导出中途失败/取消后，已同步的天保留，重试只补剩余的天；同一周期再次导出不再请求上游。
+- 全局限速器：所有上游明细请求共用，默认 45 次/分钟（可配）；命中 429 时全局暂停（优先用 `Retry-After`，否则 15 秒起指数退避、最长 3 分钟），并临时降速，连续成功后恢复；单个请求持续被限流超过 45 分钟才放弃，且错误信息会提示「已同步的天已保存，重试只补剩余」。New API 客户端对此类请求关闭内部 429 重试（`newapi.NoRateRetry`），由限速器统一决定等待。
+- 同步闸门：后台预同步与手动导出共用，同一时刻只有一个任务访问上游；手动导出会先让后台预同步让路。
+- 设置（管理设置 → 系统参数 → 使用明细本地库）：`detail.sync_enabled`、`detail.sync_interval_minutes`（5~1440）、`detail.sync_days`（1~31）、`detail.retention_days`（7~730，超期自动清理）、`detail.rate_limit`（5~300 次/分钟）。
+- 页面：导出页顶部「本地明细库」卡片（已存条数/天数/范围、后台同步状态、限速与累计限流次数）；导出进度分「同步到本地库」「从本地库写入 Excel」两个阶段，遇限流显示暂停倒计时。
+- 首次导出较早周期需要先把对应天数同步进来，耗时取决于数据量与上游限速；建议先用较短周期试一次。
 `GET|PUT /api/settings` · `GET|PUT /api/settings/channel-keys` · `GET|PUT /api/settings/newapi` · `POST /api/settings/newapi/test` · `POST /api/settings/password` · `GET /api/audit-logs`
 统一信封 `{code,message,data}`；字段校验失败 HTTP 400 / code 40001 / `data.fields`；未配置 code 40002。
 

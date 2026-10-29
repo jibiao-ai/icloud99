@@ -85,6 +85,14 @@ export default function SystemTab() {
         <FormField label="窗口结束（不含）" error={errs['iq.end_hour']}><CustomSelect value={f['iq.end_hour']} onChange={set('iq.end_hour')} options={HOURS.slice(1)} aria-label="窗口结束小时" width="100%" /></FormField>
       </Section>
 
+      <Section title="使用明细本地库" desc="明细先同步到本地库再导出，导出不再实时拉取上游；遇到上游限流（429）会自动暂停重试。">
+        <FormField label="启用后台预同步"><Switch aria-label="启用后台预同步" checked={f['detail.sync_enabled'] === '1'} onChange={(v) => set('detail.sync_enabled')(v ? '1' : '0')} /></FormField>
+        <FormField label="预同步间隔（分钟）" htmlFor="s-detail.sync_interval_minutes" error={errs['detail.sync_interval_minutes']} hint="5 ~ 1440">{inp('detail.sync_interval_minutes', { inputMode: 'numeric' })}</FormField>
+        <FormField label="预同步最近天数" htmlFor="s-detail.sync_days" error={errs['detail.sync_days']} hint="1 ~ 31，含今天；已完整的天会自动跳过">{inp('detail.sync_days', { inputMode: 'numeric' })}</FormField>
+        <FormField label="本地保留（天）" htmlFor="s-detail.retention_days" error={errs['detail.retention_days']} hint="7 ~ 730，超出的明细自动清理">{inp('detail.retention_days', { inputMode: 'numeric' })}</FormField>
+        <FormField label="上游请求限速（次/分钟）" htmlFor="s-detail.rate_limit" error={errs['detail.rate_limit']} hint="5 ~ 300，触发 429 时会自动降速">{inp('detail.rate_limit', { inputMode: 'numeric' })}</FormField>
+      </Section>
+
       <div className="flex justify-end"><LoadingButton loading={busy} icon={Save} onClick={save}>保存系统参数</LoadingButton></div>
     </div>
   );

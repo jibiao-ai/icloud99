@@ -43,6 +43,8 @@ const (
 type Error struct {
 	Kind Kind
 	Msg  string
+	// RetryAfter 上游 429 响应里的 Retry-After（无则为 0），供调用方决定暂停多久。
+	RetryAfter time.Duration
 }
 
 func (e *Error) Error() string { return e.Msg }
@@ -89,11 +91,11 @@ func (c *Client) login(ctx context.Context, cfg Cfg) (*session, error) {
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, &Error{KNet, fmt.Sprintf("无法连接 New API (%s): %v", base, err)}
+		return nil, &Error{Kind: KNet, Msg: fmt.Sprintf("无法连接 New API (%s): %v", base, err)}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, &Error{KRate, "登录被限流 (429)，请 1~2 分钟后再试"}
+		return nil, &Error{Kind: KRate, Msg: "登录被限流 (429)，请 1~2 分钟后再试", RetryAfter: retryAfter(resp)}
 	}
 	var out struct {
 		Success *bool           `json:"success"`
@@ -107,7 +109,7 @@ func (c *Client) login(ctx context.Context, cfg Cfg) (*session, error) {
 		if m == "" {
 			m = "HTTP " + strconv.Itoa(resp.StatusCode)
 		}
-		return nil, &Error{KAuth, "登录失败: " + m}
+		return nil, &Error{Kind: KAuth, Msg: "登录失败: " + m}
 	}
 	var d struct {
 		ID          int64  `json:"id"`
@@ -124,7 +126,7 @@ func (c *Client) login(ctx context.Context, cfg Cfg) (*session, error) {
 		uid = d.User.ID
 	}
 	if d.Role != nil && *d.Role < 10 {
-		return nil, &Error{KAuth, "该账号不是 New API 管理员（role < 10），无法查询全站用量"}
+		return nil, &Error{Kind: KAuth, Msg: "该账号不是 New API 管理员（role < 10），无法查询全站用量"}
 	}
 	cookie := ""
 	for _, sc := range resp.Header.Values("Set-Cookie") {
@@ -141,10 +143,10 @@ func (c *Client) login(ctx context.Context, cfg Cfg) (*session, error) {
 		cookie = "Bearer " + tok
 	}
 	if cookie == "" {
-		return nil, &Error{KAuth, "登录成功但未拿到 session cookie / access_token"}
+		return nil, &Error{Kind: KAuth, Msg: "登录成功但未拿到 session cookie / access_token"}
 	}
 	if uid == 0 {
-		return nil, &Error{KAuth, "登录成功但未拿到用户 id（New-Api-User 头必需）"}
+		return nil, &Error{Kind: KAuth, Msg: "登录成功但未拿到用户 id（New-Api-User 头必需）"}
 	}
 	return &session{url: base, cookie: cookie, uid: uid, expires: time.Now().Add(sessionTTL), key: cfgKey(cfg)}, nil
 }
@@ -181,6 +183,18 @@ func (c *Client) get(ctx context.Context, cfg Cfg, force bool) (*session, error)
 	return s, nil
 }
 
+type ctxKey int
+
+const noRateRetryKey ctxKey = 1
+
+// NoRateRetry 返回的 ctx 让 Get 遇到 429 时立即返回 KRate 错误而不自行重试，
+// 由调用方（如明细同步的全局限速器）统一决定等待多久，避免内部重试继续加重限流。
+func NoRateRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noRateRetryKey, true)
+}
+
+func noRateRetry(ctx context.Context) bool { return ctx.Value(noRateRetryKey) != nil }
+
 var authMsg = regexp.MustCompile(`(?i)未登录|access token|Unauthorized|无权`)
 var rateMsg = regexp.MustCompile(`(?i)rate|限流|频繁`)
 
@@ -202,6 +216,9 @@ func (c *Client) Get(ctx context.Context, cfg Cfg, path string, params map[strin
 			if errors.As(err, &ne) && ne.Kind != KRate && ne.Kind != KNet {
 				return nil, err
 			}
+			if errors.As(err, &ne) && ne.Kind == KRate && noRateRetry(ctx) {
+				return nil, err
+			}
 			last = err
 			sleepBackoff(ctx, attempt)
 			continue
@@ -220,7 +237,7 @@ func (c *Client) Get(ctx context.Context, cfg Cfg, path string, params map[strin
 		}
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
-			last = &Error{KNet, "请求失败: " + err.Error()}
+			last = &Error{Kind: KNet, Msg: "请求失败: " + err.Error()}
 			sleepBackoff(ctx, attempt)
 			continue
 		}
@@ -236,7 +253,7 @@ func (c *Client) Get(ctx context.Context, cfg Cfg, path string, params map[strin
 			(body.Success != nil && !*body.Success && authMsg.MatchString(body.Message))
 		if authFail {
 			if relogged {
-				return nil, &Error{KAuth, fmt.Sprintf("鉴权失败: %s", firstNonEmpty(body.Message, strconv.Itoa(resp.StatusCode)))}
+				return nil, &Error{Kind: KAuth, Msg: fmt.Sprintf("鉴权失败: %s", firstNonEmpty(body.Message, strconv.Itoa(resp.StatusCode)))}
 			}
 			relogged = true
 			c.Clear()
@@ -244,27 +261,39 @@ func (c *Client) Get(ctx context.Context, cfg Cfg, path string, params map[strin
 			continue
 		}
 		if resp.StatusCode == 429 || rateMsg.MatchString(body.Message) {
-			last = &Error{KRate, "请求被限流 (429)"}
+			last = &Error{Kind: KRate, Msg: "请求被限流 (429)", RetryAfter: retryAfter(resp)}
+			if noRateRetry(ctx) {
+				return nil, last
+			}
 			sleepBackoff(ctx, attempt)
 			continue
 		}
 		if resp.StatusCode >= 500 {
-			last = &Error{KServer, fmt.Sprintf("服务器错误 HTTP %d", resp.StatusCode)}
+			last = &Error{Kind: KServer, Msg: fmt.Sprintf("服务器错误 HTTP %d", resp.StatusCode)}
 			sleepBackoff(ctx, attempt)
 			continue
 		}
 		if resp.StatusCode >= 300 {
-			return nil, &Error{KAPI, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, body.Message)}
+			return nil, &Error{Kind: KAPI, Msg: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, body.Message)}
 		}
 		if body.Success != nil && !*body.Success {
-			return nil, &Error{KAPI, firstNonEmpty(body.Message, "接口返回失败")}
+			return nil, &Error{Kind: KAPI, Msg: firstNonEmpty(body.Message, "接口返回失败")}
 		}
 		return body.Data, nil
 	}
 	if last == nil {
-		last = &Error{KNet, "请求失败"}
+		last = &Error{Kind: KNet, Msg: "请求失败"}
 	}
 	return nil, last
+}
+
+// retryAfter 解析 Retry-After 头（秒数），异常或缺失返回 0；上限 10 分钟。
+func retryAfter(resp *http.Response) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return time.Duration(min(n, 600)) * time.Second
 }
 
 func firstNonEmpty(a, b string) string {

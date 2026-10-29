@@ -18,19 +18,24 @@ import (
 
 // settingSpec 可由页面修改的系统参数及其校验。
 var settingSpec = map[string]func(string) string{
-	"site.name":                func(v string) string { return reqText(v, 1, 40, "站点名称") },
-	"site.token_base_url":      optURL,
-	"site.primary_color":       hexColor,
-	"site.quota_per_unit":      intRange(1, 1000000000),
-	"site.currency_symbol":     func(v string) string { return reqText(v, 1, 4, "货币符号") },
-	"radar.url":                optURL,
-	"monitor.enabled":          boolStr,
-	"monitor.interval_minutes": intRange(5, 1440),
-	"monitor.retention_days":   intRange(1, 365),
-	"iq.enabled":               boolStr,
-	"iq.model":                 func(v string) string { return reqText(v, 1, 100, "检测模型") },
-	"iq.start_hour":            intRange(0, 23),
-	"iq.end_hour":              intRange(1, 24),
+	"site.name":                    func(v string) string { return reqText(v, 1, 40, "站点名称") },
+	"site.token_base_url":          optURL,
+	"site.primary_color":           hexColor,
+	"site.quota_per_unit":          intRange(1, 1000000000),
+	"site.currency_symbol":         func(v string) string { return reqText(v, 1, 4, "货币符号") },
+	"radar.url":                    optURL,
+	"monitor.enabled":              boolStr,
+	"monitor.interval_minutes":     intRange(5, 1440),
+	"monitor.retention_days":       intRange(1, 365),
+	"iq.enabled":                   boolStr,
+	"iq.model":                     func(v string) string { return reqText(v, 1, 100, "检测模型") },
+	"iq.start_hour":                intRange(0, 23),
+	"iq.end_hour":                  intRange(1, 24),
+	"detail.sync_enabled":          boolStr,
+	"detail.sync_interval_minutes": intRange(5, 1440),
+	"detail.sync_days":             intRange(1, 31),
+	"detail.retention_days":        intRange(7, 730),
+	"detail.rate_limit":            intRange(5, 300),
 }
 
 var hexRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)

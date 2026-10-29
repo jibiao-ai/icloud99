@@ -73,6 +73,7 @@ type Progress struct {
 	segTotal int
 	segDone  int
 	splits   int
+	short    int // 取到条数少于上游总数的时间段个数（说明该段不完整）
 	rows     int64
 	phase    string
 	warns    []string
@@ -84,6 +85,16 @@ func (g *Progress) Snapshot() (segTotal, segDone, splits int, rows int64, phase 
 	defer g.mu.Unlock()
 	return g.segTotal, g.segDone, g.splits, g.rows, g.phase, append([]string(nil), g.warns...)
 }
+
+// Incomplete 返回不完整的时间段个数。
+func (g *Progress) Incomplete() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.short
+}
+
+// SetRows 写入阶段更新已写行数。
+func (g *Progress) SetRows(n int64) { g.set(func() { g.rows = n }) }
 
 func (g *Progress) set(f func()) { g.mu.Lock(); f(); g.mu.Unlock() }
 
@@ -128,6 +139,9 @@ func initialSegments(p Params) []seg {
 	return out
 }
 
+// DayEnd 返回 ts 所在 CST 自然日的最后一秒。
+func DayEnd(ts int64) int64 { return dayEnd(ts) }
+
 // dayEnd 返回 ts 所在 CST 自然日的最后一秒。
 func dayEnd(ts int64) int64 {
 	t := time.Unix(ts, 0).In(usage.CST)
@@ -141,7 +155,7 @@ var retryDelay = 2 * time.Second
 func retry(ctx context.Context, f func() error) error {
 	var err error
 	for i := 0; i <= segRetries; i++ {
-		if err = f(); err == nil || ctx.Err() != nil {
+		if err = f(); err == nil || ctx.Err() != nil || IsRate(err) { // 限流由 Throttle 负责等待，这里不再叠加重试
 			return err
 		}
 		select {
@@ -196,6 +210,9 @@ func fetchSeg(ctx context.Context, fetch Fetch, sg seg, cap int, prog *Progress)
 		}
 		add(items)
 	}
+	if len(rows) < total {
+		prog.set(func() { prog.short++ })
+	}
 	if len(rows) != total {
 		prog.warn(fmt.Sprintf("时间段 %s ~ %s%s 应有 %d 条，实际取到 %d 条（拉取期间数据有变动）",
 			usage.TsToDateTime(sg.s), usage.TsToDateTime(sg.e), userSuffix(sg.user), total, len(rows)))
@@ -219,7 +236,7 @@ func userSuffix(u string) string {
 // Collect 分段拉取并按时间升序依次交给 emit。段结果按队列顺序输出，保证整体有序。
 func Collect(ctx context.Context, fetch Fetch, p Params, prog *Progress, emit func([]newapi.LogItem) error) error {
 	queue := initialSegments(p)
-	prog.set(func() { prog.segTotal, prog.phase = len(queue), "fetch" })
+	prog.set(func() { prog.segTotal += len(queue); prog.phase = "fetch" })
 	var total int
 	for len(queue) > 0 {
 		for len(queue) > 0 && queue[0].done {

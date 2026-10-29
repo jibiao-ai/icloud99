@@ -32,6 +32,8 @@ const logsFor = (name, s, e, model) => {
 
 const send = (res, body, status = 200, headers = {}) => { res.writeHead(status, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(body)); };
 let rateLimitNext = false;
+let rate429 = 0; // 接下来 N 次 /api/log/ 返回 429（带 Retry-After: 2），用于验证明细同步遇限流自动等待
+let logCalls = 0;
 
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
@@ -49,6 +51,9 @@ http.createServer((req, res) => {
       const data = logsFor('alice', NOW - 86400 * 30, NOW).slice(0, 80).map((l) => ({ ...l, other: JSON.stringify({ model_ratio: 2.5, group_ratio: 1, billing_source: 'wallet', request_path: '/v1/chat/completions' }) }));
       return send(res, { success: true, data });
     }
+    // ---- 测试控制：/__rate?n=N 注入 N 次 429；/__stats 返回 /api/log/ 累计请求数 ----
+    if (p === '/__rate') { rate429 = Number(q.get('n')) || 0; return send(res, { rate429 }); }
+    if (p === '/__stats') return send(res, { logCalls });
     // ---- 公开状态 ----
     if (p === '/api/status') return send(res, { data: { quota_per_unit: 500000, quota_display_type: 'USD' } });
     // ---- 管理端 ----
@@ -71,6 +76,8 @@ http.createServer((req, res) => {
         return send(res, { success: true, data: { quota } });
       }
       if (p === '/api/log/') {
+        logCalls++;
+        if (rate429 > 0) { rate429--; return send(res, { success: false, message: 'rate limited' }, 429, { 'Retry-After': '2' }); }
         const all = logsFor(q.get('username'), s, e, q.get('model_name'));
         const ps = Math.min(100, Number(q.get('page_size')) || 10), pg = Math.max(1, Number(q.get('p')) || 1);
         return send(res, { success: true, data: { items: all.slice((pg - 1) * ps, pg * ps), total: all.length } });

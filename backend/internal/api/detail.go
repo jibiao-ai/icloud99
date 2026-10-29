@@ -41,12 +41,15 @@ type detailJob struct {
 	users    []string
 	started  time.Time
 	finished time.Time
-	phase    string // estimate / fetch / done / failed / canceled
+	phase    string // sync / write / done / failed / canceled / expired
 	errMsg   string
 	estimate int64
-	prog     *detail.Progress
-	files    []detail.File
-	dir      string
+	// 本地库同步进度（按天）
+	daysTotal, daysDone, daysCached int
+	syncDay                         string
+	prog                            *detail.Progress
+	files                           []detail.File
+	dir                             string
 }
 
 type detailReq struct {
@@ -151,7 +154,8 @@ func (s *Server) startDetail(cfg newapi.Cfg, p detail.Params, user, ip string) b
 	j.id, j.running, j.cancel, j.canceled = newJobID(), true, cancel, false
 	j.by, j.start, j.end, j.users = user, p.Start, p.End, p.Users
 	j.started, j.finished = time.Now(), time.Time{}
-	j.phase, j.errMsg, j.estimate = "estimate", "", 0
+	j.phase, j.errMsg, j.estimate = "sync", "", 0
+	j.daysTotal, j.daysDone, j.daysCached, j.syncDay = 0, 0, 0, ""
 	j.prog, j.files, j.dir = &detail.Progress{}, nil, ""
 	id, prog := j.id, j.prog
 	j.mu.Unlock()
@@ -216,33 +220,46 @@ func (s *Server) expireDetail(id string) {
 	}
 }
 
-// runDetail 预估总量 → 分段拉取 → 流式写 Excel。
+// runDetail 先把缺失的天同步到本地库（带全局限速，遇 429 等待后继续），再从本地库流式写 Excel。
+// 每天同步完立即记录水位：失败/取消后已同步的天不会丢，重试只补缺口。
 func (s *Server) runDetail(ctx context.Context, j *detailJob, cfg newapi.Cfg, p detail.Params, prog *detail.Progress) ([]detail.File, string, error) {
-	fetch := func(ctx context.Context, o newapi.LogOpt) ([]newapi.LogItem, int, error) {
-		return s.NewAPI.ListLogs(ctx, cfg, o)
+	// 1) 独占同步闸门（先让后台预同步让路；它已完成的天已落库）
+	s.auto.stop()
+	if err := s.gate.acquire(ctx); err != nil {
+		return nil, "", err
 	}
-	// 1) 预估：每个目标只取 1 条，拿到总数；超上限直接失败，不白拉数据
-	targets := p.Users
-	if len(targets) == 0 {
-		targets = []string{""}
-	}
-	var est int64
-	for _, u := range targets {
-		_, total, err := fetch(ctx, newapi.LogOpt{Page: 1, PageSize: 1, Start: p.StartTs, End: p.EndTs, Username: u})
-		if err != nil {
-			return nil, "", fmt.Errorf("查询明细总数失败：%w", upstream(err))
+	defer s.gate.release()
+
+	// 2) 同步缺失的天
+	now := time.Now()
+	sy := s.syncer(ctx, cfg)
+	res, err := sy.Sync(ctx, p.StartTs, p.EndTs, now.Unix(), prog, func(x detail.SyncState) {
+		j.mu.Lock()
+		j.daysTotal, j.daysDone, j.daysCached, j.syncDay = x.DaysTotal, x.DaysDone, x.DaysCached, x.Day
+		j.mu.Unlock()
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, "", ctx.Err()
 		}
-		est += int64(total)
+		if detail.IsRate(err) {
+			return nil, "", fmt.Errorf("上游持续限流（429），已等待较长时间仍未恢复。已同步的 %d 天已保存到本地库，稍后重试只会补剩余的天：%w", res.DaysDone, err)
+		}
+		return nil, "", fmt.Errorf("%w（已同步的 %d 天已保存到本地库，重试只会补剩余的天）", upstreamMsg(err), res.DaysDone)
 	}
-	maxTotal := detail.MaxTotalRows
-	if est > int64(maxTotal) {
-		return nil, "", fmt.Errorf("该周期共约 %d 条明细，超过单次导出上限 %d 条，请缩短周期或指定用户后分批导出", est, maxTotal)
+
+	// 3) 从本地库统计并流式写 Excel
+	total, err := s.local().Count(ctx, p.StartTs, p.EndTs, p.Users)
+	if err != nil {
+		return nil, "", err
+	}
+	if total > int64(detail.MaxTotalRows) {
+		return nil, "", fmt.Errorf("该周期共 %d 条明细，超过单次导出上限 %d 条，请缩短周期或指定用户后分批导出", total, detail.MaxTotalRows)
 	}
 	j.mu.Lock()
-	j.estimate, j.phase = est, "fetch"
+	j.estimate, j.phase = total, "write"
 	j.mu.Unlock()
 
-	// 2) 分段拉取并流式落盘
 	dir, err := os.MkdirTemp("", "icloud99-detail-*")
 	if err != nil {
 		return nil, "", err
@@ -252,14 +269,18 @@ func (s *Server) runDetail(ctx context.Context, j *detailJob, cfg newapi.Cfg, p 
 		base += "_" + safeName(p.Users[0])
 	}
 	w := detail.NewWriter(dir, base, detailSheet(p.Start, p.End), p.MaxRowsPerFile)
-	err = detail.Collect(ctx, fetch, p, prog, func(items []newapi.LogItem) error {
-		for _, it := range items {
-			if err := w.Add(detail.ToRow(it, p.QuotaPerUnit)); err != nil {
-				return err
-			}
+	var n int64
+	err = s.local().Stream(ctx, p.StartTs, p.EndTs, p.Users, p.QuotaPerUnit, func(r detail.Row) error {
+		if err := w.Add(r); err != nil {
+			return err
+		}
+		n++
+		if n%2000 == 0 {
+			prog.SetRows(n)
 		}
 		return nil
 	})
+	prog.SetRows(n)
 	if err != nil {
 		w.Abort()
 		_ = os.RemoveAll(dir)
@@ -271,6 +292,14 @@ func (s *Server) runDetail(ctx context.Context, j *detailJob, cfg newapi.Cfg, p 
 		return nil, "", err
 	}
 	return files, dir, nil
+}
+
+// upstreamMsg 返回 upstream(err) 转换后的可读错误。
+func upstreamMsg(err error) error {
+	if e := upstream(err); e != nil {
+		return e
+	}
+	return err
 }
 
 // safeName 去掉文件名里的路径分隔符等字符。
@@ -293,6 +322,10 @@ func (s *Server) detailStatus(w http.ResponseWriter, _ *http.Request, _ *auth.Pr
 		out["phase"] = "idle"
 		httpx.OK(w, out)
 		return nil
+	}
+	out["daysTotal"], out["daysDone"], out["daysCached"], out["syncDay"] = j.daysTotal, j.daysDone, j.daysCached, j.syncDay
+	if t := s.throttle; t != nil && j.running {
+		out["pausedSec"], out["rateHits"] = int(t.PausedFor().Seconds()), t.Hits()
 	}
 	if j.prog != nil {
 		segTotal, segDone, splits, rows, _, warns := j.prog.Snapshot()

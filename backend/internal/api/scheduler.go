@@ -15,6 +15,7 @@ func (s *Server) StartScheduler(ctx context.Context) {
 		var lastMonitor time.Time
 		lastIQHour := -1
 		lastPrune := time.Time{}
+		var lastDetail time.Time
 		tick := time.NewTicker(time.Minute)
 		defer tick.Stop()
 		for {
@@ -24,9 +25,11 @@ func (s *Server) StartScheduler(ctx context.Context) {
 			case now := <-tick.C:
 				s.tickMonitor(ctx, now, &lastMonitor)
 				s.tickIQ(ctx, now, &lastIQHour)
+				s.tickDetailSync(ctx, now, &lastDetail)
 				if now.Sub(lastPrune) > 6*time.Hour {
 					lastPrune = now
 					s.Runner.PruneBefore(ctx, s.Store.SettingInt(ctx, "monitor.retention_days", 90))
+					s.pruneDetail(ctx)
 				}
 			}
 		}

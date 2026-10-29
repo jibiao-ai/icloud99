@@ -3,10 +3,12 @@ package newapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDecodePage(t *testing.T) {
@@ -79,5 +81,45 @@ func TestMapPool(t *testing.T) {
 	MapPool([]int{1, 2, 3, 4, 5}, 2, func(_ int, x int) { atomic.AddInt64(&sum, int64(x)) })
 	if sum != 15 {
 		t.Fatal(sum)
+	}
+}
+
+// 429：默认会内部退避重试；NoRateRetry 则立即返回并带上 Retry-After。
+func TestGetRateLimitNoRateRetry(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":1,"role":100}}`))
+		default:
+			atomic.AddInt32(&calls, 1)
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(429)
+		}
+	}))
+	defer srv.Close()
+	c := New()
+	cfg := Cfg{URL: srv.URL, Username: "a", Password: "b"}
+	_, err := c.Get(NoRateRetry(context.Background()), cfg, "/api/log/stat", nil)
+	var ne *Error
+	if !errors.As(err, &ne) || ne.Kind != KRate {
+		t.Fatalf("应返回 KRate: %v", err)
+	}
+	if ne.RetryAfter != 7*time.Second {
+		t.Fatalf("RetryAfter=%v", ne.RetryAfter)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Fatalf("NoRateRetry 不应内部重试，实际请求 %d 次", n)
+	}
+}
+
+func TestRetryAfterParse(t *testing.T) {
+	mk := func(v string) *http.Response { return &http.Response{Header: http.Header{"Retry-After": []string{v}}} }
+	cases := map[string]time.Duration{"5": 5 * time.Second, "": 0, "abc": 0, "-3": 0, "99999": 600 * time.Second}
+	for in, want := range cases {
+		if got := retryAfter(mk(in)); got != want {
+			t.Errorf("%q => %v want %v", in, got, want)
+		}
 	}
 }
