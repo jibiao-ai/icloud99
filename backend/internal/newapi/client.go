@@ -442,6 +442,9 @@ type LogItem struct {
 	Channel          any    `json:"channel"`
 	ChannelName      string `json:"channel_name"`
 	RequestID        string `json:"request_id"`
+	Content          string `json:"content"`
+	// Other 兼容「JSON 对象」与「内含 JSON 的字符串」两种形态，用于提取上游请求 ID。
+	Other json.RawMessage `json:"other"`
 }
 
 // LogOpt 明细查询参数。

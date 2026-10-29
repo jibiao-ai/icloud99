@@ -45,6 +45,14 @@ export const billApi = {
   exportPdf: (doc) => postBlob('/bill/export', doc, 'bill.pdf'),
 };
 
+export const detailApi = {
+  accounts: () => http.get('/detail/accounts'),
+  start: (body) => http.post('/detail/export', body),
+  status: () => http.get('/detail/export/status'),
+  cancel: () => http.post('/detail/export/cancel'),
+  download: (file) => blob('/detail/export/download', { file }),
+};
+
 export const settingsApi = {
   get: () => http.get('/settings'),
   save: (body) => http.put('/settings', body),

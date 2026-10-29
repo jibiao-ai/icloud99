@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Brain, Crosshair, Headset, LineChart, Menu, Moon, Radio, Settings, ShieldCheck, Sun, Users, X } from 'lucide-react';
+import { Brain, Crosshair, FileSpreadsheet, Headset, LineChart, Menu, Moon, Radio, Settings, ShieldCheck, Sun, Users, X } from 'lucide-react';
 import { useStore } from '../store';
 
-const ICONS = { LineChart, Radio, Crosshair, Brain, Users, Headset, Settings };
+const ICONS = { FileSpreadsheet, LineChart, Radio, Crosshair, Brain, Users, Headset, Settings };
 
 // 菜单与权限码一一对应，前端不判断角色（铁律8）。perm 为空表示所有人可见。
 const MENU = [
@@ -12,6 +12,7 @@ const MENU = [
   { key: 'iq-radar', label: 'GPT智商雷达', path: '/radar', icon: 'Crosshair', perm: 'radar:view' },
   { key: 'iq-test', label: '智力检测', path: '/iq', icon: 'Brain', perm: 'iq:view' },
   { key: 'usage-stats', label: '用量统计', path: '/usage', icon: 'Users', perm: 'usage:view' },
+  { key: 'detail-export', label: '使用明细导出', path: '/detail-export', icon: 'FileSpreadsheet', perm: 'detail:export' },
   { key: 'contact', label: '联系我们', path: '/contact', icon: 'Headset', perm: 'contact:view' },
   { key: 'settings', label: '管理设置', path: '/settings', icon: 'Settings', perm: '' },
 ];

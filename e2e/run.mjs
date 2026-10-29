@@ -293,6 +293,25 @@ try {
   check(await page.getByText('优惠金额应在').first().isVisible(), '优惠金额超过总额：字段级错误提示');
   await page.keyboard.press('Escape');
 
+  // ───────── 使用明细导出（仅管理员）─────────
+  title('使用明细导出：菜单 -> 分段导出 -> 下载 Excel');
+  await go('/detail-export');
+  await page.getByRole('heading', { name: '使用明细导出' }).waitFor();
+  check(await page.getByRole('link', { name: '使用明细导出' }).first().isVisible(), '管理员菜单含「使用明细导出」');
+  await pick('导出用户', 'alice');
+  await page.getByRole('heading', { name: '使用明细导出' }).click();
+  await page.getByRole('button', { name: '开始导出' }).click();
+  await page.getByText('导出完成').first().waitFor({ timeout: 60000 });
+  check(await page.getByText(/导出文件（1 个/).isVisible(), '导出结果列出 1 个文件');
+  await shot('21-detail-export');
+  const [xl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.getByRole('button', { name: '下载', exact: true }).first().click()]);
+  const xlPath = `${OUT}detail.xlsx`;
+  await xl.saveAs(xlPath);
+  const xbuf = (await import('node:fs')).readFileSync(xlPath);
+  check(xbuf.subarray(0, 2).toString() === 'PK' && xbuf.length > 1000, `下载内容为 xlsx（${xbuf.length} 字节）`);
+  const anonDetail = await fetch(`${BASE}/api/detail/export/status`);
+  check(anonDetail.status === 401, `匿名访问明细导出接口被拒（HTTP ${anonDetail.status}）`);
+
   // ───────── 8 审计 & 安全 ─────────
   title('审计日志：脱敏 + 筛选');
   await go('/settings?tab=audit');

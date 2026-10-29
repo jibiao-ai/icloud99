@@ -7,6 +7,7 @@ import ChannelStatusPage from './pages/ChannelStatusPage';
 import RadarPage from './pages/RadarPage';
 import IQTestPage from './pages/IQTestPage';
 import UsageStatsPage from './pages/UsageStatsPage';
+import DetailExportPage from './pages/DetailExportPage';
 import ContactPage from './pages/ContactPage';
 import SettingsPage from './pages/SettingsPage';
 import Skeleton from './components/Skeleton';
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/radar" element={<RadarPage />} />
         <Route path="/iq" element={<IQTestPage />} />
         <Route path="/usage" element={<UsageStatsPage />} />
+        <Route path="/detail-export" element={<DetailExportPage />} />
         <Route path="/contact" element={<ContactPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/token-usage" replace />} />

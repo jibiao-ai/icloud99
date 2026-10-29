@@ -7,7 +7,7 @@ import SearchInput from '../SearchInput';
 import CustomSelect from '../CustomSelect';
 import { fmtDateTime } from '../../utils/format';
 
-const MODULE = { auth: '认证', settings: '系统设置', channel: '渠道', iq: '智力检测', usage: '用量统计', token: '令牌查询' };
+const MODULE = { auth: '认证', settings: '系统设置', channel: '渠道', iq: '智力检测', usage: '用量统计', token: '令牌查询', bill: '账单导出', detail: '明细导出' };
 
 /** 审计日志：服务端分页；详情已在后端递归脱敏。 */
 export default function AuditTab() {

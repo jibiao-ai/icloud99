@@ -27,6 +27,7 @@ New API（api.icloud99.cn）AI 渠道可视化监控平台：渠道状态、智�
 `GET /api/iq/{tests|stats|schedule|run/status}` · `POST /api/iq/run`（后台异步、流式调用上游并自动重试的鹈鹕骑行 SVG 动画检测；上游故障不记为降智，约 2~5 分钟，页面轮询状态；失败原因写入审计日志与检测记录）· `POST /api/token-usage/query`
 `GET /api/usage/{summary|export}` · `GET /api/usage/user/{name}[/logs]`
 `GET /api/bill/accounts` · `GET /api/bill/draft?account=&months=2026-08,2026-09` · `POST /api/bill/export`（**仅管理员**，权限 `bill:export`：用量统计页「导出账单 PDF」，选账号与月份生成草稿，可在线修改标题/公司名/账号/各月起止日期/费用总额/优惠/明细行/备注，再由服务端渲染 A4 PDF，含元擎智算 logo、每月开始与截止日期、金额；字体与 logo 通过 `go:embed` 内置，生产镜像无需系统字体）
+`GET /api/detail/accounts` · `POST /api/detail/export`（body：`start,end,users[],rowsPerFile`）· `GET /api/detail/export/status` · `POST /api/detail/export/cancel` · `GET /api/detail/export/download?file=<name>|all`（**仅管理员**，权限 `detail:export`：菜单「使用明细导出」。按周期导出全站（或指定 ≤50 个）用户的调用明细为 Excel，列与格式同《Token账单_含明细.xlsx》（21 列、微软雅黑表头、时间升序、sheet 如「09月明细」）。**分段策略**：按北京时间自然日 × 用户切段，先取首页得到段内总数，超过 5000 条则按时间二分直到不超限，再逐页（100/页）拉取，按日志 id 去重、段间并发 3、失败重试、全程按时间有序合并；开始前预估总量，超过 200 万行直接拒绝。Excel 以流式写入（内存与行数无关），每文件默认 30 万行自动拆分，多文件下载为 zip。后台任务，同一时间仅 1 个，可取消，页面可断线恢复进度，文件保留 2 小时，完成后写审计）
 `GET|PUT /api/settings` · `GET|PUT /api/settings/channel-keys` · `GET|PUT /api/settings/newapi` · `POST /api/settings/newapi/test` · `POST /api/settings/password` · `GET /api/audit-logs`
 统一信封 `{code,message,data}`；字段校验失败 HTTP 400 / code 40001 / `data.fields`；未配置 code 40002。
 

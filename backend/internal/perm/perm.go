@@ -13,6 +13,7 @@ const (
 	UsageView      = "usage:view"
 	UsageExport    = "usage:export"
 	BillExport     = "bill:export"
+	DetailExport   = "detail:export"
 	SettingsView   = "settings:view"
 	SettingsEdit   = "settings:edit"
 	AuditView      = "audit:view"
@@ -36,6 +37,7 @@ var Menus = []Menu{
 	{"iq-radar", "GPT智商雷达", "/radar", "Crosshair", RadarView},
 	{"iq-test", "智力检测", "/iq", "Brain", IQView},
 	{"usage-stats", "用量统计", "/usage", "Users", UsageView},
+	{"detail-export", "使用明细导出", "/detail-export", "FileSpreadsheet", DetailExport},
 	{"contact", "联系我们", "/contact", "Headset", ContactView},
 	{"settings", "管理设置", "/settings", "Settings", ""},
 }
@@ -46,7 +48,7 @@ var Anonymous = []string{ChannelView, IQView, TokenQuery, ContactView, RadarView
 // Admin 管理员拥有全部权限。
 var Admin = []string{
 	ChannelView, ChannelTest, ChannelManage, IQView, IQRun, TokenQuery, ContactView, RadarView,
-	UsageView, UsageExport, BillExport, SettingsView, SettingsEdit, AuditView, PasswordChange,
+	UsageView, UsageExport, BillExport, DetailExport, SettingsView, SettingsEdit, AuditView, PasswordChange,
 }
 
 // Set 将切片转换为集合。

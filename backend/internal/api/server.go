@@ -22,17 +22,18 @@ import (
 
 // Server 聚合依赖。
 type Server struct {
-	DB      *sql.DB
-	Store   *store.Store
-	Signer  *auth.Signer
-	Audit   *audit.Recorder
-	Runner  *monitor.Runner
-	NewAPI  *newapi.Client
-	Usage   *usage.Service
-	Limiter *auth.Limiter
-	HTTP    *http.Client
-	CST     *time.Location
-	iqJob   iqJob
+	DB        *sql.DB
+	Store     *store.Store
+	Signer    *auth.Signer
+	Audit     *audit.Recorder
+	Runner    *monitor.Runner
+	NewAPI    *newapi.Client
+	Usage     *usage.Service
+	Limiter   *auth.Limiter
+	HTTP      *http.Client
+	CST       *time.Location
+	iqJob     iqJob
+	detailJob detailJob
 }
 
 type ctxKey int
@@ -104,6 +105,11 @@ func (s *Server) rec(r *http.Request, p *auth.Principal, module, action, target,
 		IP: clientIP(r), Username: user, Err: err, Started: t0})
 }
 
+// rec2 后台任务（无 HTTP 请求）写审计。
+func (s *Server) rec2(user, ip, module, action, target, link string, detail any, err error, t0 time.Time) {
+	s.Audit.Record(audit.Entry{Module: module, Action: action, Target: target, Link: link, Detail: detail, IP: ip, Username: user, Err: err, Started: t0})
+}
+
 // Handler 构建路由。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -143,6 +149,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/bill/accounts", s.guard("bill:export", s.billAccounts))
 	mux.Handle("GET /api/bill/draft", s.guard("bill:export", s.billDraft))
 	mux.Handle("POST /api/bill/export", s.guard("bill:export", s.billExport))
+
+	// 使用明细导出（仅管理员：detail:export；后台分段拉取，页面轮询）
+	mux.Handle("GET /api/detail/accounts", s.guard("detail:export", s.billAccounts))
+	mux.Handle("POST /api/detail/export", s.guard("detail:export", s.detailStart))
+	mux.Handle("GET /api/detail/export/status", s.guard("detail:export", s.detailStatus))
+	mux.Handle("POST /api/detail/export/cancel", s.guard("detail:export", s.detailCancel))
+	mux.Handle("GET /api/detail/export/download", s.guard("detail:export", s.detailDownload))
 
 	// 管理设置
 	mux.Handle("GET /api/settings", s.guard("settings:view", s.settingsGet))
